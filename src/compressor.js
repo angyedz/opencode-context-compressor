@@ -11,8 +11,8 @@
  * 5. Strict Character & Token Bounding (Max 12,000 chars)
  */
 
-const MAX_HISTORY_CHARS = 12000;
-const COMPACT_TRIGGER_CHARS = 10000;
+const MAX_HISTORY_CHARS = 16000;
+const COMPACT_TRIGGER_CHARS = 14000;
 
 const SYSTEM_MEMO_DIRECTIVE = `[System Directive: ModelMemo & Context Compressor]
 - A \`model-memo\` MCP server is connected to persistent storage (~/.model-memo/memo.json).

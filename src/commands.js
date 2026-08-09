@@ -49,7 +49,7 @@ function isCompressorDisabled(sessionKey) {
 }
 
 function getSessionLimit(sessionKey) {
-  return sessionLimits.get(sessionKey) || 12000;
+  return sessionLimits.get(sessionKey) || 16000;
 }
 
 function executeCommand(messages, sessionKey = 'default') {

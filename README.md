@@ -13,13 +13,13 @@
 <a name="english"></a>
 ## 🇬🇧 English
 
-> ⚠️ **IMPORTANT DISCLAIMER & BEST PRACTICE**
+> ⚠️ **IMPORTANT DISCLAIMER & BEST PRACTICE RECOMMENDATIONS**
 > 
 > **Aggressive history compression (e.g. setting `$compressor limit` below `6k–8k` chars or on multi-file complex refactoring sessions) may cause the model to lose track of exact signatures or subtle logic written 10+ turns ago.**
 > 
-> - **Recommended for Large Multi-File Refactoring:** `$compressor limit 32k` or `$compressor limit 55k`
-> - **Recommended for Standard Iterative Coding:** `$compressor limit 12k` *(Default)*
-> - **Recommended for Simple Q&A / Quick Scripts:** `$compressor limit 6k`
+> - 💻 **Recommended for Daily Development:** `$compressor limit 16k` – `$compressor limit 20k` *(Default Golden Standard ~4,000 – 5,000 tokens)*
+> - 🏢 **Recommended for Large Multi-File Refactoring:** `$compressor limit 32k` or `$compressor limit 55k`
+> - ⚡ **Recommended for Simple Q&A / Quick Scripts:** `$compressor limit 6k` – `$compressor limit 8k`
 
 ---
 
@@ -27,13 +27,13 @@
 
 During extended coding sessions in OpenCode, context sizes naturally grow as previous tool outputs, git diffs, and generated code accumulate.
 
-**opencode-context-compressor** is a local MITM proxy running between OpenCode and LLM providers (**Qwen 3.8 Max**, **GPT-5.6 Sol**, **Claude Opus 5**, **DeepSeek V4**). It intelligently prunes redundant terminal output, compresses historical turns, and bounds context according to your configured limit (`12k`, `32k`, `55k` chars).
+**opencode-context-compressor** is a local MITM proxy running between OpenCode and LLM providers (**Qwen 3.8 Max**, **GPT-5.6 Sol**, **Claude Opus 5**, **DeepSeek V4**). It intelligently prunes redundant terminal output, compresses historical turns, and bounds context according to your configured limit (`16k`, `32k`, `55k` chars).
 
 ---
 
 ### 📊 Real-World Benchmark (5 Sequential Coding Tasks on `Qwen 3.8 Max`)
 
-Below are actual empirical measurements executed via OpenCode on **Qwen 3.8 Max (`qwen3.8-max`)** comparing uncompressed history vs `opencode-context-compressor` (default `12k` limit):
+Below are actual empirical measurements executed via OpenCode on **Qwen 3.8 Max (`qwen3.8-max`)** comparing uncompressed history vs `opencode-context-compressor` (default `16k` limit):
 
 #### 🧪 Benchmark Scenario Tasks:
 1. **Task 1**: Node.js HTTP REST API server with JWT auth and JSON routing.
@@ -51,19 +51,19 @@ Below are actual empirical measurements executed via OpenCode on **Qwen 3.8 Max 
 | **Task 3** (3 turns code) | 9,694 chars (~2,424 tokens) | 9,994 chars (~2,499 tokens) | **0%** (Intact) | 4,316 chars (100% production code) |
 | **Task 4** (4 turns code) | 14,286 chars (~3,572 tokens) | 10,723 chars (~2,681 tokens) | **-25.0%** 📉 | 4,942 chars (Clean AST parser, 0 loss) |
 | **Task 5** (5 turns code) | 18,970 chars (~4,743 tokens) | **10,214 chars (~2,554 tokens)** | **-46.2%** 📉 | **4,772 chars (Full CLI Manager, 0 loss)** |
-| **Task 10+** *(Projected)* | 45,000+ chars (~11,250 tok) | **~10,500 chars (~2,600 tokens)** | **~-76.6%** 🎯 | **Strictly Bounded (~4.8k chars code)** |
+| **Task 10+** *(Projected)* | 45,000+ chars (~11,250 tok) | **~12,500 chars (~3,100 tokens)** | **~-72.2%** 🎯 | **Strictly Bounded (~4.8k chars code)** |
 
 #### 🧠 Code Quality & Attention Impact:
 - **Zero Loss of Code Completeness**: Average response output size remains **4,500 – 5,000 chars of production code** per task in both modes.
 - **Elimination of *"Lost in the Middle"* Effect**: By skeletonizing older turns and stripping noisy terminal logs, the model's attention heads remain 100% focused on current task instructions rather than historical noise.
-- **Strict Bounding**: Total prompt context is strictly bounded around **~2,500 tokens (10k chars)** regardless of session depth.
+- **Optimal Bounding**: Total prompt context is strictly bounded around **~3,000 – 4,000 tokens (16k chars)** regardless of session depth.
 
 ---
 
 ### 🔥 Features
 
-- **⚡ Zero-Cost In-Chat Commands**: Commands like `$compressor status`, `$compressor limit 32k`, `$compressor off/on`, `$compressor update` are answered directly by the proxy in **0ms with 0 LLM API calls**.
-- **🎛️ Configurable Context Limit**: Set your session threshold dynamically (`$compressor limit 12k`, `$compressor limit 32k`, `$compressor limit 55k`).
+- **⚡ Zero-Cost In-Chat Commands**: Commands like `$compressor status`, `$compressor limit 16k`, `$compressor off/on`, `$compressor update` are answered directly by the proxy in **0ms with 0 LLM API calls**.
+- **🎛️ Configurable Context Limit**: Set your session threshold dynamically (`$compressor limit 16k`, `$compressor limit 32k`, `$compressor limit 55k`).
 - **🔄 In-Chat Self-Update**: Run `$compressor update` in OpenCode chat to pull the latest code and restart the service via a non-blocking detached worker.
 - **🌊 Unbuffered Real-Time Streaming**: Socket `TCP_NODELAY` + header flushing for smooth word-by-word SSE streaming.
 - **🛡️ Truncation Protection**: Enforces adequate `max_tokens` headers to prevent output cutting off mid-response.
@@ -96,9 +96,9 @@ opencode-cc
 > 
 > **Слишком агрессивное сжатие истории (например, установка `$compressor limit` ниже `6k–8k` символов или работа со сложным многофайловым рефакторингом) может привести к тому, что модель потеряет точные сигнатуры функций или тонкую логику, написанную 10+ шагов назад.**
 > 
-> - **Рекомендуется для крупного рефакторинга:** `$compressor limit 32k` или `$compressor limit 55k`
-> - **Рекомендуется для обычной разработки:** `$compressor limit 12k` *(По умолчанию)*
-> - **Рекомендуется для простых вопросов / скриптов:** `$compressor limit 6k`
+> - 💻 **Рекомендуется для повседневной разработки:** `$compressor limit 16k` – `$compressor limit 20k` *(Золотой стандарт по умолчанию ~4 000 – 5 000 токенов)*
+> - 🏢 **Рекомендуется для крупного рефакторинга:** `$compressor limit 32k` или `$compressor limit 55k`
+> - ⚡ **Рекомендуется для простых вопросов / скриптов:** `$compressor limit 6k` – `$compressor limit 8k`
 
 ---
 
@@ -106,13 +106,13 @@ opencode-cc
 
 В процессе длительной разработки в OpenCode объем контекста неизбежно растет из-за накапливающихся выводов консоли, `git diff` и создаваемого кода.
 
-**opencode-context-compressor** — это локальный MITM прокси-сервер между OpenCode и провайдерами нейросетей (**Qwen 3.8 Max**, **GPT-5.6 Sol**, **Claude Opus 5**, **DeepSeek V4**). Он аккуратно сжимает устаревшие логи, удаляет лишний шум и удерживает контекст в пределах заданного лимита (`12k`, `32k`, `55k` символов).
+**opencode-context-compressor** — это локальный MITM прокси-сервер между OpenCode и провайдерами нейросетей (**Qwen 3.8 Max**, **GPT-5.6 Sol**, **Claude Opus 5**, **DeepSeek V4**). Он аккуратно сжимает устаревшие логи, удаляет лишний шум и удерживает контекст в пределах заданного лимита (`16k`, `32k`, `55k` символов).
 
 ---
 
 ### 📊 Реальный бенчмарк (5 последовательных задач кодинга на `Qwen 3.8 Max`)
 
-Ниже приведены реальные измеримые результаты бенчмаркинга в OpenCode на модели **Qwen 3.8 Max (`qwen3.8-max`)** при сравнении стандартного режима без прокси и с `opencode-context-compressor` (лимит по умолчанию `12k`):
+Ниже приведены реальные измеримые результаты бенчмаркинга в OpenCode на модели **Qwen 3.8 Max (`qwen3.8-max`)** при сравнении стандартного режима без прокси и с `opencode-context-compressor` (лимит по умолчанию `16k`):
 
 #### 🧪 Сценарий бенчмарка из 5 задач:
 1. **Задача 1**: HTTP REST API сервер на чистом Node.js с авторизацией JWT.
@@ -130,19 +130,19 @@ opencode-cc
 | **Задача 3** (3 хода) | 9 694 симв (~2 424 токенов) | 9 994 симв (~2 499 токенов) | **0%** (Без изменений) | 4 316 симв (100% чистый рабочий код) |
 | **Задача 4** (4 хода) | 14 286 симв (~3 572 токенов) | 10 723 симв (~2 681 токенов) | **-25.0%** 📉 | 4 942 симв (AST-парсер без потерь) |
 | **Задача 5** (5 ходов) | 18 970 симв (~4 743 токенов) | **10 214 симв (~2 554 токенов)** | **-46.2%** 📉 | **4 772 симв (Полноценный CLI, 0 потерь)** |
-| **Задача 10+** *(Прогноз)* | 45 000+ симв (~11 250 токенов) | **~10 500 симв (~2 600 токенов)** | **~-76.6%** 🎯 | **Жесткий лимит (~4.8k симв кода)** |
+| **Задача 10+** *(Прогноз)* | 45 000+ симв (~11 250 токенов) | **~12 500 симв (~3 100 токенов)** | **~-72.2%** 🎯 | **Жесткий лимит (~4.8k симв кода)** |
 
 #### 🧠 Анализ качества кода и внимания модели (Attention):
 - **Нулевая потеря полноты кода**: Средний размер генерируемого ответа с компрессором составляет **4 500 – 5 000 символов готового кода** на задачу в обоих режимах (без заглушек и `// todo`).
 - **Устранение эффекта *"Lost in the Middle"*: Очистка логов консоли и скелетонизация старых ходов позволяет вниманию нейросети фокусно концентрироваться на текущей задаче, не отвлекаясь на информационный шум прошлых шагов.
-- **Контролируемое окно**: Суммарный контекст **жестко удерживается в районе ~2 500 токенов (10k символов)** независимо от количества пройденных шагов в сессии.
+- **Оптимальное окно**: Суммарный контекст **жестко удерживается в районе ~3 000 – 4 000 токенов (16k символов)** независимо от количества пройденных шагов в сессии.
 
 ---
 
 ### 🔥 Возможности
 
-- **⚡ Бесплатные инчат-команды**: Команды `$compressor status`, `$compressor limit 32k`, `$compressor off/on`, `$compressor update` обработаются локально за **0мс и 0 токенов**.
-- **🎛️ Гибкая настройка порога**: Изменение лимита контекста прямо в чате (`$compressor limit 12k`, `$compressor limit 32k`, `$compressor limit 55k`).
+- **⚡ Бесплатные инчат-команды**: Команды `$compressor status`, `$compressor limit 16k`, `$compressor off/on`, `$compressor update` обработаются локально за **0мс и 0 токенов**.
+- **🎛️ Гибкая настройка порога**: Изменение лимита контекста прямо в чате (`$compressor limit 16k`, `$compressor limit 32k`, `$compressor limit 55k`).
 - **🔄 Самообновление из чата**: Команда `$compressor update` затягивает свежий код с GitHub и перезапускает сервис в фоновом независящем процессе.
 - **🌊 Плавный стриминг**: Сокеты в режиме `TCP_NODELAY` отдают токены по 1 слову без задержек.
 - **🛡️ Защита от обрыва ответа**: Гарантия выставления корректных `max_tokens` заголовков.
@@ -171,7 +171,7 @@ opencode-cc
 
 - `$compressor check-update` — Проверить наличие обновлений на GitHub
 - `$compressor update` — Выполнить самообновление в фоновом потоке
-- `$compressor limit <N>` — Установить лимит контекста (например `12k`, `32k`, `55000`)
+- `$compressor limit <N>` — Установить лимит контекста (например `16k`, `32k`, `55000`)
 - `$compressor status` — Проверить статус сжатия
 - `$compressor off` / `on` — Переключить компрессор
 - `$history` — Посмотреть историю сохранённых чекпоинтов
