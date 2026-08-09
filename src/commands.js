@@ -5,6 +5,7 @@
  */
 
 const memoStore = require('./memo-store');
+const disabledSessions = new Set();
 const sessionLimits = new Map();
 
 function isCommandMessage(messages) {

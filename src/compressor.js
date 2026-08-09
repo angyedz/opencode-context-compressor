@@ -176,6 +176,8 @@ function compressMessages(rawMessages, options = {}) {
   if (options.disabled) return messages;
 
   const maxChars = Number(options.maxChars) || MAX_HISTORY_CHARS;
+  const totalLength = messages.reduce((acc, m) => acc + extractText(m.content).length, 0);
+  const totalTurns = messages.filter((m) => m?.role !== 'system').length;
 
   if (totalLength < Math.min(COMPACT_TRIGGER_CHARS, maxChars) && totalTurns <= 8) {
     return messages;
