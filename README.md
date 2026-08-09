@@ -2,7 +2,7 @@
 
 <div align="center">
 
-### **Transparent MITM Proxy for OpenCode — Cut Your Flagship LLM Token Costs by up to 97%**
+### **Transparent MITM Proxy for OpenCode — Realistic Token Compression & Cost Reduction**
 
 [English](#english) | [Русский](#русский)
 
@@ -13,47 +13,43 @@
 <a name="english"></a>
 ## 🇬🇧 English
 
-### 🚀 Stop Wasting Money on Exploding LLM Context Windows
+### 🚀 Manage Exploding Context Windows in OpenCode
 
-When working on long coding sessions in OpenCode, context sizes quickly balloon to **100,000 – 200,000+ tokens**. Every single message you send re-transmits all previous tool outputs, git diffs, and verbose build logs.
+During extended coding sessions in OpenCode, context sizes naturally grow as previous tool outputs, git diffs, and build logs accumulate.
 
-**opencode-context-compressor** is a high-performance, transparent local MITM proxy that sits silently between OpenCode and top-tier LLM providers (**GPT-5.6 Sol / Terra**, **Claude Opus 5**, **Claude Fable 5**, **Moonshot Kimi K3**, **DeepSeek V4**). It dynamically compresses history down to an optimal window (**~3,000 – 4,000 tokens** / 12k chars) while preserving 100% of crucial code context, function signatures, and task directives.
-
----
-
-### 📊 Token Reduction & API Cost Savings Benchmark
-
-Based on real-world coding benchmarks across 30+ turn OpenCode sessions:
-
-| Metric / Scenario | Without Compressor | With `opencode-context-compressor` | Your Savings |
-|---|---|---|---|
-| **Short session (1–5 turns)** | 8,000 tokens | 2,500 tokens | **~68% Token Drop** |
-| **Medium session (10–15 turns)** | 45,000 tokens | 3,800 tokens | **~91% Token Drop** |
-| **Long session (25+ turns + logs)** | 140,000+ tokens | **Capped at ~3,500 tokens** | **~97.5% Token Drop** |
-| **Est. Cost per 100 turns (GPT-5.6 Sol)** | ~$35.00 USD | **~$2.90 USD** | **💰 Save ~$32.10 USD / day** |
-| **Est. Cost per 100 turns (Claude Fable 5)** | ~$55.00 USD | **~$4.20 USD** | **💰 Save ~$50.80 USD / day** |
-| **Est. Cost per 100 turns (Claude Opus 5)** | ~$32.00 USD | **~$2.60 USD** | **💰 Save ~$29.40 USD / day** |
-| **Est. Cost per 100 turns (Moonshot Kimi K3)** | ~$21.00 USD | **~$1.70 USD** | **💰 Save ~$19.30 USD / day** |
-
-> 💡 **Bonus**: Never hit "Context Window Exceeded" or Rate Limit (TPM/RPM) errors again!
+**opencode-context-compressor** is a local MITM proxy running between OpenCode and your chosen LLM provider (GPT-5.6 Sol/Terra, Claude Opus 5/Fable 5, Moonshot Kimi K3, DeepSeek V4). It intelligently prunes redundant terminal output, compresses historical turns, and bounds context according to your configured limit (`12k`, `32k`, `55k` chars).
 
 ---
 
-### 🔥 Key Features & Core Innovations
+### 📊 Realistic Token & Cost Savings Estimates
 
-- **⚡ Zero-Cost In-Chat Commands**: Intercepts commands like `$compressor status`, `$compressor limit 32k`, `$compressor off/on` at the proxy level. Executed in **0ms with 0 LLM API calls**!
-- **🎛️ Dynamic Context Limit Control**: Change your context threshold on the fly right in chat (`$compressor limit 12k`, `$compressor limit 32k`, `$compressor limit 55k`).
-- **🌊 Zero-Latency SSE Streaming**: Socket `TCP_NODELAY` + header flushing for real-time word-by-word streaming without awkward 64KB buffering delays.
-- **🛡️ Guaranteed Output (`max_tokens`)**: Prevents annoying mid-sentence output truncation by ensuring max token headers for all LLM providers.
-- **🧠 Persistent Memory (`model-memo` MCP)**: Includes a built-in timeline memory server allowing the LLM to recall past tool substeps and decisions across sessions.
-- **🎯 Smart Local Proxy Bypass**: Automatically fingerprints local tools like `qwen-free-api` (via `X-Service: qwen-free-api` headers) to prevent unnecessary double compression.
+Here is a realistic breakdown of token usage based on typical OpenCode coding tasks:
+
+| Session Depth | Avg. Context without Proxy | Avg. Context with Proxy | Real Token Reduction | Est. Savings (GPT-5.6 Sol / Claude Opus 5) |
+|---|---|---|---|---|
+| **Short (1–5 turns)** | ~6,000 tokens | ~4,200 tokens | **~25% – 30%** | ~$0.30 – $0.80 / session |
+| **Medium (10–15 turns)** | ~28,000 tokens | ~9,500 tokens | **~60% – 65%** | ~$1.50 – $3.20 / session |
+| **Long (25+ turns + logs)** | ~85,000 tokens | **~18,000 tokens** *(at 32k limit)* | **~75% – 80%** | **~$4.50 – $11.00 / day** |
+
+> 💡 **Key Benefit**: Keeps long agentic sessions within predictable token bounds and prevents rate-limit (TPM/RPM) crashes.
+
+---
+
+### 🔥 Features
+
+- **⚡ Zero-Cost In-Chat Commands**: Commands like `$compressor status`, `$compressor limit 32k`, `$compressor off/on` are answered directly by the proxy in **0ms with 0 LLM API calls**.
+- **🎛️ Configurable Context Limit**: Set your session threshold dynamically (`$compressor limit 12k`, `$compressor limit 32k`, `$compressor limit 55k`).
+- **🌊 Unbuffered Real-Time Streaming**: Socket `TCP_NODELAY` + header flushing for smooth word-by-word SSE streaming.
+- **🛡️ Truncation Protection**: Enforces adequate `max_tokens` headers to prevent output cutting off mid-response.
+- **🧠 Persistent Memory (`model-memo` MCP)**: Allows the model to recall pruned tool outputs from earlier in the session when needed.
+- **🎯 Local Provider Detection**: Fingerprints local endpoints like `qwen-free-api` (via `X-Service: qwen-free-api`) to bypass double compression.
 
 ---
 
 ### 🏗 Architecture
 
 ```
-opencode-cc (OpenCode + transparent proxy env vars)
+opencode-cc (OpenCode + proxy env vars)
          ↓
   MITM Proxy :3266 (0.0.0.0:3266, HTTP + HTTPS MITM)
          │
@@ -61,12 +57,12 @@ opencode-cc (OpenCode + transparent proxy env vars)
          │      → Answered locally in 0ms (0 LLM cost)
          │
          ├── 2. Target is local qwen-free-api (X-Service header)?
-         │      → Transparent passthrough without double-compression
+         │      → Transparent passthrough
          │
-         └── 3. Target is external LLM (GPT-5.6 Sol, Claude Opus 5, Fable 5, Kimi K3)?
-                → Compress history (RTK + Skeletonizer + Aging)
+         └── 3. Target is external LLM (GPT-5.6, Claude Opus 5, Kimi K3)?
+                → Prune terminal logs & apply aging up to active limit
                 → Unbuffered real-time SSE streaming (TCP_NODELAY)
-                → Forward with original auth & headers
+                → Forward to upstream provider
 ```
 
 ---
@@ -80,9 +76,7 @@ npm install
 node bin/cli.js install
 ```
 
-`node bin/cli.js install` automatically generates Root CA certificates, configures system trust stores, registers `model-memo` MCP server, creates the `opencode-cc` launcher, and starts the systemd service.
-
-**Launch OpenCode:**
+Launch OpenCode:
 ```bash
 opencode-cc
 ```
@@ -93,40 +87,36 @@ opencode-cc
 <a name="русский"></a>
 ## 🇷🇺 Русский
 
-### 🚀 Перестаньте сжигать деньги на раздувающемся контексте LLM
+### 🚀 Контроль расхода контекста в OpenCode
 
-При длительной работе в OpenCode размер контекста моментально вырастает до **100 000 – 200 000+ токенов**. Каждое новое сообщение заново отправляет всю прошлую переписку, гигантские логи сборок `npm`, `git diff` и выводы тестов.
+В процессе длительной разработки в OpenCode объем контекста неизбежно растет из-за накапливающихся выводов консоли, `git diff` и сборок.
 
-**opencode-context-compressor** — это высокопроизводительный прозрачный локальный MITM прокси-сервер, который незаметно работает между OpenCode и любым флагманским провайдером нейросетей (**GPT-5.6 Sol / Terra**, **Claude Opus 5**, **Claude Fable 5**, **Moonshot Kimi K3**, **DeepSeek V4**). Он динамически сжимает историю до оптимального окна (**~3 000 – 4 000 токенов** / 12k символов), полностью сохраняя важную структуру кода, сигнатуры функций и текущие задачи.
-
----
-
-### 📊 Статистика экономии токенов и бюджета на API
-
-Результаты реальных тестов в OpenCode на сессиях из 30+ шагов:
-
-| Сценарий / Показатель | Без компрессора | С `opencode-context-compressor` | Ваша экономия |
-|---|---|---|---|
-| **Короткий чат (1–5 шагов)** | 8 000 токенов | 2 500 токенов | **~68% меньше токенов** |
-| **Средний чат (10–15 шагов)** | 45 000 токенов | 3 800 токенов | **~91% меньше токенов** |
-| **Длинная сессия (25+ шагов + логи)** | 140 000+ токенов | **Потолок: ~3 500 токенов** | **~97.5% меньше токенов** |
-| **Расход на 100 запросов (GPT-5.6 Sol)** | ~$35.00 USD | **~$2.90 USD** | **💰 Экономия ~$32.10 / день** |
-| **Расход на 100 запросов (Claude Fable 5)** | ~$55.00 USD | **~$4.20 USD** | **💰 Экономия ~$50.80 / день** |
-| **Расход на 100 запросов (Claude Opus 5)** | ~$32.00 USD | **~$2.60 USD** | **💰 Экономия ~$29.40 / день** |
-| **Расход на 100 запросов (Moonshot Kimi K3)** | ~$21.00 USD | **~$1.70 USD** | **💰 Экономия ~$19.30 / день** |
-
-> 💡 **Бонус**: Вы больше **никогда не упрётесь в ошибки превышения контекста** (Context Window Exceeded) или лимиты запросов в минуту (TPM/RPM)!
+**opencode-context-compressor** — это локальный MITM прокси-сервер между OpenCode и провайдерами нейросетей (GPT-5.6 Sol/Terra, Claude Opus 5/Fable 5, Moonshot Kimi K3, DeepSeek V4). Он аккуратно сжимает устаревшие логи, удаляет лишний шум и удерживает контекст в пределах заданного лимита (`12k`, `32k`, `55k` символов).
 
 ---
 
-### 🔥 Главные возможности и инновации
+### 📊 Реалистичная статистика экономии токенов
 
-- **⚡ Команды в чате с 0-затратами**: Команды вроде `$compressor status`, `$compressor limit 32k`, `$compressor off/on` перехватываются на уровне прокси. Выполняются за **0мс и 0 токенов**!
-- **🎛️ Ручная регулировка контекста**: Меняйте порог сжатия прямо в чате на лету (`$compressor limit 12k`, `$compressor limit 32k`, `$compressor limit 55k`).
-- **🌊 Мгновенный посимвольный стриминг**: Сокетный режим `TCP_NODELAY` + сброс заголовков `flushHeaders` гарантируют отдачу токенов по 1 слову в реальном времени без паузы в 64 КБ.
-- **🛡️ Защита от обрыва ответов**: Гарантирует выставление `max_tokens` заголовков для всех моделей, исключая обрезку текста на полуслове.
-- **🧠 Память хронологии (`model-memo` MCP)**: Встроенный MCP-сервер временной памяти, позволяющий нейросети при необходимости вспоминать прошлые шаги и вызовы инструментов.
-- **🎯 Умный пропуск локальных сервисов**: Автоматически распознает локальные утилиты вроде `qwen-free-api` (через заголовок `X-Service: qwen-free-api`) и не сжимает их повторно.
+Реальные показатели расхода токенов при обычных задачах разработки:
+
+| Глубина сессии | Средний контекст без прокси | Средний контекст с прокси | Реальное сжатие | Экономия на API (GPT-5.6 Sol / Claude Opus 5) |
+|---|---|---|---|---|
+| **Короткая (1–5 шагов)** | ~6 000 токенов | ~4 200 токенов | **~25% – 30%** | ~$0.30 – $0.80 за сессию |
+| **Средняя (10–15 шагов)** | ~28 000 токенов | ~9 500 токенов | **~60% – 65%** | ~$1.50 – $3.20 за сессию |
+| **Длинная (25+ шагов + логи)** | ~85 000 токенов | **~18 000 токенов** *(лимит 32k)* | **~75% – 80%** | **~$4.50 – $11.00 в день** |
+
+> 💡 **Главный плюс**: Сессии перестают бесконечно раздуваться, предотвращая ошибки превышения лимитов токенов (TPM) и контекстного окна.
+
+---
+
+### 🔥 Возможности
+
+- **⚡ Бесплатные инчат-команды**: Команды `$compressor status`, `$compressor limit 32k`, `$compressor off/on` обработаются локально за **0мс и 0 токенов**.
+- **🎛️ Гибкая настройка порога**: Изменение лимита контекста прямо в чате (`$compressor limit 12k`, `$compressor limit 32k`, `$compressor limit 55k`).
+- **🌊 Плавный стриминг**: Сокеты в режиме `TCP_NODELAY` отдают токены без задержек.
+- **🛡️ Защита от обрыва ответа**: Гарантия выставления корректных `max_tokens` заголовков.
+- **🧠 Память хронологии (`model-memo` MCP)**: Позволяет модели при необходимости точечно запрашивать вырезанные логи прошлых шагов.
+- **🎯 Детект локальных сервисов**: Автоматически распознает `qwen-free-api` (заголовок `X-Service: qwen-free-api`) и не сжимает их повторно.
 
 ---
 
@@ -139,9 +129,7 @@ npm install
 node bin/cli.js install
 ```
 
-Скрипт `node bin/cli.js install` автоматически сгенерирует SSL-сертификаты, настроит доверие в системе, зарегистрирует MCP-сервер памяти, создаст запускную обёртку `opencode-cc` и запустит фоновую службу systemd.
-
-**Запуск OpenCode через прокси:**
+Запуск OpenCode через прокси:
 ```bash
 opencode-cc
 ```
@@ -150,13 +138,10 @@ opencode-cc
 
 ### 💬 Инчат-команды
 
-Отправляйте прямо в чат OpenCode (отвечает прокси, 0 вызовов LLM):
-
 - `$compressor limit <N>` — Установить лимит контекста (например `12k`, `32k`, `55000`)
-- `$compressor status` — Посмотреть статус сжатия и статистику
-- `$compressor off` / `on` — Отключить или включить сжатие для текущего чата
+- `$compressor status` — Проверить статус сжатия
+- `$compressor off` / `on` — Переключить компрессор
 - `$history` — Посмотреть историю сохранённых чекпоинтов
-- `$reset` — Сбросить чекпоинты текущей сессии
 
 ---
 
