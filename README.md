@@ -13,6 +13,16 @@
 <a name="english"></a>
 ## 🇬🇧 English
 
+> ⚠️ **IMPORTANT DISCLAIMER & BEST PRACTICE**
+> 
+> **Aggressive history compression (e.g. setting `$compressor limit` below `6k–8k` chars or on multi-file complex refactoring sessions) may cause the model to lose track of exact signatures or subtle logic written 10+ turns ago.**
+> 
+> - **Recommended for Large Multi-File Refactoring:** `$compressor limit 32k` or `$compressor limit 55k`
+> - **Recommended for Standard Iterative Coding:** `$compressor limit 12k` *(Default)*
+> - **Recommended for Simple Q&A / Quick Scripts:** `$compressor limit 6k`
+
+---
+
 ### 🚀 Manage Exploding Context Windows in OpenCode
 
 During extended coding sessions in OpenCode, context sizes naturally grow as previous tool outputs, git diffs, and generated code accumulate.
@@ -81,6 +91,16 @@ opencode-cc
 
 <a name="русский"></a>
 ## 🇷🇺 Русский
+
+> ⚠️ **ВАЖНОЕ ПРЕДУПРЕЖДЕНИЕ И РЕКОМЕНДАЦИИ**
+> 
+> **Слишком агрессивное сжатие истории (например, установка `$compressor limit` ниже `6k–8k` символов или работа со сложным многофайловым рефакторингом) может привести к тому, что модель потеряет точные сигнатуры функций или тонкую логику, написанную 10+ шагов назад.**
+> 
+> - **Рекомендуется для крупного рефакторинга:** `$compressor limit 32k` или `$compressor limit 55k`
+> - **Рекомендуется для обычной разработки:** `$compressor limit 12k` *(По умолчанию)*
+> - **Рекомендуется для простых вопросов / скриптов:** `$compressor limit 6k`
+
+---
 
 ### 🚀 Контроль расхода контекста в OpenCode
 
