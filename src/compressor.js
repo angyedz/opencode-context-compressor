@@ -243,8 +243,8 @@ function compressMessages(rawMessages, options = {}) {
   });
 
   let olderText = olderSummaryLines.join('\n');
-  if (olderText.length > MAX_HISTORY_CHARS) {
-    olderText = olderText.slice(-MAX_HISTORY_CHARS);
+  if (olderText.length > maxChars) {
+    olderText = olderText.slice(-maxChars);
   }
 
   const foldedUserMessage = {
