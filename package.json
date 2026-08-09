@@ -1,0 +1,27 @@
+{
+  "name": "opencode-context-compressor",
+  "version": "1.0.0",
+  "description": "Native Context Compressor Injection Plugin & Persistent Timeline MCP Server (context-compressor) for OpenCode",
+  "main": "src/plugin.js",
+  "bin": {
+    "context-compressor": "bin/cli.js",
+    "opencode-context-compressor": "bin/cli.js"
+  },
+  "scripts": {
+    "start": "node src/mcp-server.js",
+    "test": "node test/test-injection.js"
+  },
+  "keywords": [
+    "opencode",
+    "mcp",
+    "context-compressor",
+    "ai-agent",
+    "timeline-memory"
+  ],
+  "author": "angyedz",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "node-forge": "^1.4.0"
+  }
+}
