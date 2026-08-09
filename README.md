@@ -17,7 +17,7 @@
 
 When working on long coding sessions in OpenCode, context sizes quickly balloon to **100,000 – 200,000+ tokens**. Every single message you send re-transmits all previous tool outputs, git diffs, and verbose build logs.
 
-**opencode-context-compressor** is a high-performance, transparent local MITM proxy that sits silently between OpenCode and top-tier LLM providers (Claude 3.7 Sonnet / Claude 4, GPT-4.5, DeepSeek V3 / R1 / V4, Gemini 2.0 Flash / Pro, Qwen 3.8 Max). It dynamically compresses history down to an optimal window (**~3,000 – 4,000 tokens** / 12k chars) while preserving 100% of crucial code context, function signatures, and task directives.
+**opencode-context-compressor** is a high-performance, transparent local MITM proxy that sits silently between OpenCode and top-tier LLM providers (**GPT-5.6 Sol / Terra**, **Claude Opus 5**, **Claude Fable 5**, **Moonshot Kimi K3**, **DeepSeek V4**). It dynamically compresses history down to an optimal window (**~3,000 – 4,000 tokens** / 12k chars) while preserving 100% of crucial code context, function signatures, and task directives.
 
 ---
 
@@ -30,9 +30,10 @@ Based on real-world coding benchmarks across 30+ turn OpenCode sessions:
 | **Short session (1–5 turns)** | 8,000 tokens | 2,500 tokens | **~68% Token Drop** |
 | **Medium session (10–15 turns)** | 45,000 tokens | 3,800 tokens | **~91% Token Drop** |
 | **Long session (25+ turns + logs)** | 140,000+ tokens | **Capped at ~3,500 tokens** | **~97.5% Token Drop** |
-| **Est. Cost per 100 turns (Claude 3.7 Sonnet / Claude 4)** | ~$21.00 USD | **~$1.80 USD** | **💰 Save ~$19.20 USD / day** |
-| **Est. Cost per 100 turns (GPT-4.5 / GPT-5)** | ~$35.00 USD | **~$2.90 USD** | **💰 Save ~$32.10 USD / day** |
-| **Est. Cost per 100 turns (DeepSeek V3 / R1)** | ~$3.80 USD | **~$0.30 USD** | **💰 Save ~$3.50 USD / day** |
+| **Est. Cost per 100 turns (GPT-5.6 Sol)** | ~$35.00 USD | **~$2.90 USD** | **💰 Save ~$32.10 USD / day** |
+| **Est. Cost per 100 turns (Claude Fable 5)** | ~$55.00 USD | **~$4.20 USD** | **💰 Save ~$50.80 USD / day** |
+| **Est. Cost per 100 turns (Claude Opus 5)** | ~$32.00 USD | **~$2.60 USD** | **💰 Save ~$29.40 USD / day** |
+| **Est. Cost per 100 turns (Moonshot Kimi K3)** | ~$21.00 USD | **~$1.70 USD** | **💰 Save ~$19.30 USD / day** |
 
 > 💡 **Bonus**: Never hit "Context Window Exceeded" or Rate Limit (TPM/RPM) errors again!
 
@@ -62,7 +63,7 @@ opencode-cc (OpenCode + transparent proxy env vars)
          ├── 2. Target is local qwen-free-api (X-Service header)?
          │      → Transparent passthrough without double-compression
          │
-         └── 3. Target is external LLM (Claude 3.7/4, GPT-4.5/5, DeepSeek, Gemini)?
+         └── 3. Target is external LLM (GPT-5.6 Sol, Claude Opus 5, Fable 5, Kimi K3)?
                 → Compress history (RTK + Skeletonizer + Aging)
                 → Unbuffered real-time SSE streaming (TCP_NODELAY)
                 → Forward with original auth & headers
@@ -96,7 +97,7 @@ opencode-cc
 
 При длительной работе в OpenCode размер контекста моментально вырастает до **100 000 – 200 000+ токенов**. Каждое новое сообщение заново отправляет всю прошлую переписку, гигантские логи сборок `npm`, `git diff` и выводы тестов.
 
-**opencode-context-compressor** — это высокопроизводительный прозрачный локальный MITM прокси-сервер, который незаметно работает между OpenCode и любым флагманским провайдером нейросетей (Claude 3.7 Sonnet / Claude 4, GPT-4.5, DeepSeek V3 / R1 / V4, Gemini 2.0 Flash / Pro, Qwen 3.8 Max). Он динамически сжимает историю до оптимального окна (**~3 000 – 4 000 токенов** / 12k символов), полностью сохраняя важную структуру кода, сигнатуры функций и текущие задачи.
+**opencode-context-compressor** — это высокопроизводительный прозрачный локальный MITM прокси-сервер, который незаметно работает между OpenCode и любым флагманским провайдером нейросетей (**GPT-5.6 Sol / Terra**, **Claude Opus 5**, **Claude Fable 5**, **Moonshot Kimi K3**, **DeepSeek V4**). Он динамически сжимает историю до оптимального окна (**~3 000 – 4 000 токенов** / 12k символов), полностью сохраняя важную структуру кода, сигнатуры функций и текущие задачи.
 
 ---
 
@@ -109,9 +110,10 @@ opencode-cc
 | **Короткий чат (1–5 шагов)** | 8 000 токенов | 2 500 токенов | **~68% меньше токенов** |
 | **Средний чат (10–15 шагов)** | 45 000 токенов | 3 800 токенов | **~91% меньше токенов** |
 | **Длинная сессия (25+ шагов + логи)** | 140 000+ токенов | **Потолок: ~3 500 токенов** | **~97.5% меньше токенов** |
-| **Расход на 100 запросов (Claude 3.7 Sonnet / Claude 4)** | ~$21.00 USD | **~$1.80 USD** | **💰 Экономия ~$19.20 / день** |
-| **Расход на 100 запросов (GPT-4.5 / GPT-5)** | ~$35.00 USD | **~$2.90 USD** | **💰 Экономия ~$32.10 / день** |
-| **Расход на 100 запросов (DeepSeek V3 / R1)** | ~$3.80 USD | **~$0.30 USD** | **💰 Экономия ~$3.50 / день** |
+| **Расход на 100 запросов (GPT-5.6 Sol)** | ~$35.00 USD | **~$2.90 USD** | **💰 Экономия ~$32.10 / день** |
+| **Расход на 100 запросов (Claude Fable 5)** | ~$55.00 USD | **~$4.20 USD** | **💰 Экономия ~$50.80 / день** |
+| **Расход на 100 запросов (Claude Opus 5)** | ~$32.00 USD | **~$2.60 USD** | **💰 Экономия ~$29.40 / день** |
+| **Расход на 100 запросов (Moonshot Kimi K3)** | ~$21.00 USD | **~$1.70 USD** | **💰 Экономия ~$19.30 / день** |
 
 > 💡 **Бонус**: Вы больше **никогда не упрётесь в ошибки превышения контекста** (Context Window Exceeded) или лимиты запросов в минуту (TPM/RPM)!
 
