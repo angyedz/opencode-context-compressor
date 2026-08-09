@@ -4,9 +4,21 @@
  * In-Chat $ Command Interceptor & Handler for OpenCode Plugin Injection.
  */
 
+const { spawn } = require('child_process');
+const path = require('path');
 const memoStore = require('./memo-store');
 const disabledSessions = new Set();
 const sessionLimits = new Map();
+
+function triggerSelfUpdate() {
+  const repoDir = path.resolve(__dirname, '..');
+  const updateScript = `sleep 0.5 && cd "${repoDir}" && git pull origin master && systemctl --user restart context-compressor.service`;
+  const child = spawn('/bin/bash', ['-c', updateScript], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+}
 
 function isCommandMessage(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return false;
@@ -78,6 +90,13 @@ function executeCommand(messages, sessionKey = 'default') {
         `- **Disk Storage:** \`~/.model-memo/memo.json\`\n\n` +
         `*Use \`$memo clear\` to reset session memory.*`;
     }
+  } else if (cmd === 'update' || cmd === 'upgrade') {
+    triggerSelfUpdate();
+    responseText = `🚀 **Context Compressor Self-Updater Initiated**\n\n` +
+      `- **Action:** Pulling latest code from GitHub \`master\`...\n` +
+      `- **Process:** Independent detached background worker initialized.\n` +
+      `- **Service:** Restarting \`context-compressor.service\`...\n\n` +
+      `*Check status in a few seconds via \`$compressor status\`.*`;
   } else if (cmd === 'history' || cmd === 'timeline') {
     responseText = memoStore.recall(sessionKey, 'recent', 1500);
   } else if (cmd === 'search') {
