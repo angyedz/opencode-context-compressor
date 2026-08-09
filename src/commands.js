@@ -4,7 +4,7 @@
  * In-Chat $ Command Interceptor & Handler for OpenCode Plugin Injection.
  */
 
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const memoStore = require('./memo-store');
 const disabledSessions = new Set();
@@ -18,6 +18,23 @@ function triggerSelfUpdate() {
     stdio: 'ignore',
   });
   child.unref();
+}
+
+function checkUpdates() {
+  const repoDir = path.resolve(__dirname, '..');
+  try {
+    execSync(`cd "${repoDir}" && git fetch origin master`, { timeout: 8000, stdio: 'ignore' });
+    const local = execSync(`cd "${repoDir}" && git rev-parse --short HEAD`, { encoding: 'utf8' }).trim();
+    const remote = execSync(`cd "${repoDir}" && git rev-parse --short origin/master`, { encoding: 'utf8' }).trim();
+    const behindCount = execSync(`cd "${repoDir}" && git rev-list --count HEAD..origin/master`, { encoding: 'utf8' }).trim();
+
+    if (local === remote || behindCount === '0') {
+      return `✅ **Context Compressor is Up To Date**\n\n- **Current Version:** \`${local}\` (latest)\n- **Status:** All changes synced with GitHub origin/master.`;
+    }
+    return `🔍 **Update Available!**\n\n- **Current Version:** \`${local}\`\n- **Latest Version:** \`${remote}\` (${behindCount} commit(s) behind)\n\n*Run \`$compressor update\` to apply the update automatically.*`;
+  } catch (e) {
+    return `⚠️ **Update Check Failed**: ${e.message}`;
+  }
 }
 
 function isCommandMessage(messages) {
@@ -90,6 +107,8 @@ function executeCommand(messages, sessionKey = 'default') {
         `- **Disk Storage:** \`~/.model-memo/memo.json\`\n\n` +
         `*Use \`$memo clear\` to reset session memory.*`;
     }
+  } else if (cmd === 'check' || cmd === 'check-update' || cmd === 'checkupdate') {
+    responseText = checkUpdates();
   } else if (cmd === 'update' || cmd === 'upgrade') {
     triggerSelfUpdate();
     responseText = `🚀 **Context Compressor Self-Updater Initiated**\n\n` +
