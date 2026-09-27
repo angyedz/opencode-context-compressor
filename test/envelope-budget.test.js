@@ -34,3 +34,10 @@ test('history char conversion respects explicit upper bound',()=>{
   const plan={bounded:true,availableHistoryTokens:5000};
   assert.equal(e.historyCharBudgetFromEnvelope(plan,{maxChars:4000}),4000);
 });
+
+
+test('tiny available history never expands past the strict token envelope',()=>{
+  const plan={bounded:true,availableHistoryTokens:50};
+  const chars=e.historyCharBudgetFromEnvelope(plan,{charsPerToken:3.2,minChars:800,maxChars:16000});
+  assert.equal(chars,160);
+});
