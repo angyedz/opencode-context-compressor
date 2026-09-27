@@ -128,16 +128,18 @@ class SessionMemoStore {
       const text = messageToMemoText(m);
       return text && !isControlCommand(text);
     });
+    if (!firstUser) {
+      const active = this.getActiveSessionKey();
+      if (active) return active;
+    }
+
     const seed = [
       metadata.provider || '',
       metadata.model || '',
       firstUser ? messageToMemoText(firstUser).slice(0, 4000) : '',
     ].join('\n');
 
-    if (!seed.trim()) {
-      const active = this.getActiveSessionKey();
-      return active || 'default-active-session';
-    }
+    if (!seed.trim()) return 'default-active-session';
 
     return `session-${crypto.createHash('sha256').update(seed).digest('hex').slice(0, 20)}`;
   }
