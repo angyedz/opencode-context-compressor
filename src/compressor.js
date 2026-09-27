@@ -344,6 +344,24 @@ function collectHistoricalAnchors(turns, activeText = '') {
   return collectRankedAnchors(turns, activeText, 24);
 }
 
+function buildStateSnapshot(turns, activeText = '') {
+  const anchors = collectRankedAnchors(turns, activeText, 18);
+  const buckets = { blockers: [], constraints: [], pending: [], implementation: [] };
+  for (const fact of anchors) {
+    const lower = fact.toLowerCase();
+    if (/\b(error|failed|exception|panic|regression|broken|failure|blocked)\b/.test(lower)) buckets.blockers.push(fact);
+    else if (/\b(decision|must|require|required|contract|compatib|invariant|signature|schema)\b/.test(lower)) buckets.constraints.push(fact);
+    else if (/\b(todo|fixme|next|remaining)\b/.test(lower)) buckets.pending.push(fact);
+    else buckets.implementation.push(fact);
+  }
+  const lines = ['### Working state'];
+  for (const [name, facts] of Object.entries(buckets)) {
+    if (!facts.length) continue;
+    lines.push(`- ${name}: ${facts.slice(0, 6).join(' ; ')}`);
+  }
+  return lines.length > 1 ? lines.join('\n') : '';
+}
+
 function summarizeTurns(turns, activeText = '') {
   const lines = [];
   let number = 1;
@@ -357,11 +375,12 @@ function summarizeTurns(turns, activeText = '') {
   }
 
   const anchors = collectHistoricalAnchors(turns, activeText);
+  const state = buildStateSnapshot(turns, activeText);
   const anchorBlock = anchors.length
     ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
     : '';
 
-  return `${anchorBlock}### Turn excerpts\n${lines.join('\n')}`;
+  return `${state ? state + '\n\n' : ''}${anchorBlock}### Turn excerpts\n${lines.join('\n')}`;
 }
 
 function makeHistorySummary(text) {
@@ -561,6 +580,7 @@ module.exports = {
   collectHistoricalAnchors,
   collectRankedAnchors,
   scoreFact,
+  buildStateSnapshot,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
