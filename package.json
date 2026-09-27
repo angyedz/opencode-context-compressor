@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/mcp-server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "benchmark": "node bench/context-benchmark.js"
   },
   "keywords": [
     "opencode",
