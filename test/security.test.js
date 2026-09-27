@@ -28,8 +28,11 @@ test('root CA private key is created with restrictive permissions', () => {
 });
 
 
-test('installer does not claim Linux systemd startup on unsupported platforms', () => {
+test('launcher is cross-platform and installer contains no systemd dependency', () => {
   const cli = source('bin/cli.js');
-  assert.match(cli, /process\.platform !== 'linux'/);
-  assert.match(cli, /automatic daemon startup was not confirmed/);
+  const launcher = source('bin/opencode-cc.js');
+  assert.doesNotMatch(cli, /systemctl|systemd/);
+  assert.match(launcher, /process\.platform === 'win32'/);
+  assert.match(launcher, /waitForProxy/);
+  assert.match(launcher, /NODE_EXTRA_CA_CERTS/);
 });
