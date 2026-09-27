@@ -278,3 +278,14 @@ test('completed TODO is suppressed from pending historical state', () => {
   const snapshot=buildStateSnapshot(turns,'continue src/cache/store.js');
   assert.doesNotMatch(snapshot,/pending:.*TODO/i);
 });
+
+
+test('anchor selection preserves diversity instead of letting one noisy file consume the state', () => {
+  const turns=[];
+  for(let i=0;i<12;i++) turns.push([{role:'assistant',content:`TODO: src/auth/session.js auth issue ${i} must be fixed.`}]);
+  turns.push([{role:'assistant',content:'Decision: src/db/store.js schema contract must remain compatible.'}]);
+  turns.push([{role:'assistant',content:'Error: src/api/router.js endpoint /v1/users failed integration test.'}]);
+  const anchors=collectRankedAnchors(turns,'continue project',10).join('\n');
+  assert.match(anchors,/src\/db\/store\.js/);
+  assert.match(anchors,/src\/api\/router\.js/);
+});
