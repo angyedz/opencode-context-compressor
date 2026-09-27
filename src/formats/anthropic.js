@@ -72,15 +72,42 @@ function buildResponse(text) {
   };
 }
 
+function sseEvent(name, payload) {
+  return `event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
 function buildStreamChunks(text) {
   const msgId = `msg-local-${Date.now()}`;
   return [
-    `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: 'context-compressor-local', stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`,
-    `event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`,
-    `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`,
-    `event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`,
-    `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 0 } })}\n\n`,
-    `event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`,
+    sseEvent('message_start', {
+      type: 'message_start',
+      message: {
+        id: msgId,
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model: 'context-compressor-local',
+        stop_reason: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    }),
+    sseEvent('content_block_start', {
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' },
+    }),
+    sseEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text },
+    }),
+    sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }),
+    sseEvent('message_delta', {
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 0 },
+    }),
+    sseEvent('message_stop', { type: 'message_stop' }),
   ];
 }
 
