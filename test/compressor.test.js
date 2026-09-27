@@ -20,6 +20,8 @@ const {
   factEntities,
   recentBudgetRatio,
   lifecycleState,
+  stableTextFingerprint,
+  collapseRepeatedToolOutputs,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -288,4 +290,20 @@ test('anchor selection preserves diversity instead of letting one noisy file con
   const anchors=collectRankedAnchors(turns,'continue project',10).join('\n');
   assert.match(anchors,/src\/db\/store\.js/);
   assert.match(anchors,/src\/api\/router\.js/);
+});
+
+
+test('repeated tool outputs collapse while the newest equivalent result remains exact', () => {
+  const turns=[];
+  for(let i=0;i<12;i++) turns.push([
+    {role:'user',content:'run tests again'},
+    {role:'assistant',content:'running',tool_calls:[{id:'c'+i,type:'function',function:{name:'shell',arguments:'{}'}}]},
+    {role:'tool',name:'shell',tool_call_id:'c'+i,content:'12:30:0'+(i%10)+' npm test\nPASS 42 tests in 1.2s'},
+    {role:'assistant',content:'Tests passed.'},
+  ]);
+  const collapsed=collapseRepeatedToolOutputs(turns);
+  const toolTexts=collapsed.flat().filter(m=>m.role==='tool').map(m=>String(m.content));
+  assert.ok(toolTexts.filter(x=>x.includes('PASS 42 tests')).length <= 2);
+  assert.ok(toolTexts.some(x=>x.includes('latest equivalent result retained')));
+  assert.equal(stableTextFingerprint('12:30:01 PASS in 1.2s'), stableTextFingerprint('12:30:09 PASS in 9.8s'));
 });
