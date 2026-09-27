@@ -161,3 +161,14 @@ test('cold summaries retain implementation anchors needed by later coding turns'
   assert.match(serialized, /900 seconds/);
   assert.equal(out[out.length - 1].content, 'Now fix the original auth issue without changing its contract.');
 });
+
+
+test('Gemini function and inline-data parts are treated as structured protocol content', () => {
+  const functionMessage = { role: 'assistant', content: [{ functionCall: { name: 'read_file', args: { path: 'src/x.js' } } }] };
+  const responseMessage = { role: 'user', content: [{ functionResponse: { name: 'read_file', response: { result: 'ok' } } }] };
+  const imageMessage = { role: 'user', content: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }] };
+
+  assert.equal(hasStructuredContent(functionMessage), true);
+  assert.equal(hasStructuredContent(responseMessage), true);
+  assert.equal(hasStructuredContent(imageMessage), true);
+});
