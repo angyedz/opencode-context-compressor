@@ -519,6 +519,25 @@ function recentBudgetRatio(turns, maxChars) {
   return 0.55;
 }
 
+function rescueRelevantTurns(turns, activeText, budget) {
+  const activeEntities = new Set(factEntities(activeText));
+  if (!activeEntities.size || budget < 400) return [];
+  const candidates = [];
+  for (let i = 0; i < (turns || []).length; i += 1) {
+    const turn = turns[i];
+    const text = turn.map((m) => extractText(m.content)).join('\n');
+    const overlap = factEntities(text).filter((e) => activeEntities.has(e)).length;
+    if (!overlap) continue;
+    const size = messagesSize(turn);
+    if (size > Math.min(3200, budget)) continue;
+    candidates.push({ turn, overlap, i, size });
+  }
+  candidates.sort((a,b)=>b.overlap-a.overlap || b.i-a.i);
+  const selected=[]; let used=0;
+  for(const c of candidates){ if(used+c.size>budget) continue; selected.push(c.turn); used+=c.size; if(selected.length>=2) break; }
+  return selected;
+}
+
 function boundRecentHistory(turns, maxChars, activeText = '') {
   let selected = [];
   let used = 0;
@@ -540,7 +559,13 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
   }
 
   const selectedCount = selected.length;
-  const older = turns.slice(0, Math.max(0, turns.length - selectedCount));
+  let older = turns.slice(0, Math.max(0, turns.length - selectedCount));
+  const rescued = rescueRelevantTurns(older, activeText, Math.floor(maxChars * 0.18));
+  if (rescued.length) {
+    const rescuedSet = new Set(rescued);
+    older = older.filter((turn) => !rescuedSet.has(turn));
+    selected = [...rescued, ...selected];
+  }
 
   while (messagesSize(selected.flat()) > Math.floor(maxChars * Math.max(recentRatio, 0.72)) && selected.length > 1) {
     older.push(selected.shift());
@@ -701,6 +726,7 @@ module.exports = {
   recentBudgetRatio,
   stableTextFingerprint,
   collapseRepeatedToolOutputs,
+  rescueRelevantTurns,
   lifecycleState,
   lifecycleTopic,
   hasStructuredContent,
