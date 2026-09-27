@@ -20,7 +20,7 @@ const tls = require('tls');
 const url = require('url');
 
 const formats = require('./formats');
-const compressor = require('./compressor');
+const runtimePipeline = require('./context/runtime-pipeline');
 const commands = require('./commands');
 const memoStore = require('./memo-store');
 const { getDomainCert, getCA, CA_CERT_PATH } = require('./ca');
@@ -147,11 +147,8 @@ async function handleAiRequest(req, res, targetUrl, body) {
   memoStore.syncMessages(sessionKey, msgs);
 
   // ── 1. Command interception: ALWAYS answered by compressor directly (0 LLM calls) ──
-  if (commands.isCommandMessage([{ role: 'user', content: lastUserText }])) {
-    const replyText = commands.executeCommand(
-      [{ role: 'user', content: lastUserText }],
-      sessionKey
-    );
+  if (commands.isCommandMessage(msgs)) {
+    const replyText = commands.executeCommand(msgs, sessionKey);
     const isStream = Boolean(parsed.stream) || pathname.includes('streamGenerateContent');
 
     if (isStream) {
@@ -181,9 +178,7 @@ async function handleAiRequest(req, res, targetUrl, body) {
   }
 
   // ── 3. Normal request to external LLM: compress context → forward ──────
-  const disabled = commands.isCompressorDisabled(sessionKey);
-  const maxChars = commands.getSessionLimit(sessionKey);
-  const compressed = compressor.compressMessages(msgs, { disabled, maxChars });
+  const compressed = runtimePipeline.compressAndRecord(msgs, sessionKey, { requestBody: parsed }).messages;
   const newBody = Buffer.from(JSON.stringify(formats.rebuildBody(parsed, compressed, format)));
 
   return forwardRequest(req, res, newBody, targetUrl);
