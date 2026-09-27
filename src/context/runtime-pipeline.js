@@ -46,28 +46,53 @@ function resolveOptions(sessionKey,options={}){
   };
 }
 
-function compressAndRecord(messages,sessionKey,options={}){
-  const resolved=resolveOptions(sessionKey,options);
-  const repaired=transcriptRepair.repair(messages);
-  const fileCompacted=fileReadCompactor.compactRepeatedFileReads(repaired.messages);
-  const workingSet=fileWorkingSet.renderWorkingSet(fileCompacted.messages,{maxFiles:12});
-  const compressed=compressor.compressMessages(fileCompacted.messages,resolved);
-  const invariantReport=invariants.evaluate(fileCompacted.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
-  if(options.strictInvariants===true&&!invariantReport.valid) invariants.assert(fileCompacted.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
-  const report=compressionReport.publicReport(
-    compressionReport.buildCompressionReport(fileCompacted.messages,compressed,{
+function insertSystemSignal(messages,signal){
+  if(!signal) return messages;
+  const output=[...(messages||[])];
+  let index=0;
+  while(index<output.length&&output[index]?.role==='system') index+=1;
+  output.splice(index,0,signal);
+  return output;
+}
+
+function buildReport(input,output,resolved){
+  return compressionReport.publicReport(
+    compressionReport.buildCompressionReport(input,output,{
       maxChars:resolved.maxChars,
       maxTokens:resolved.maxTokens,
       maxInputTokens:resolved.maxInputTokens,
       reserveOutputTokens:resolved.reserveOutputTokens,
     })
   );
+}
+
+function compressAndRecord(messages,sessionKey,options={}){
+  const resolved=resolveOptions(sessionKey,options);
+  const repaired=transcriptRepair.repair(messages);
+  const fileCompacted=fileReadCompactor.compactRepeatedFileReads(repaired.messages);
+  const workingSet=fileWorkingSet.renderWorkingSet(fileCompacted.messages,{maxFiles:12});
+  const baseCompressed=compressor.compressMessages(fileCompacted.messages,resolved);
+
+  const provisional=buildReport(fileCompacted.messages,baseCompressed,resolved);
+  const signal=options.awarenessSignal===false
+    ? null
+    : awareness.previewSignal(sessionKey,provisional,Number(options.awarenessThresholdTokens)||512);
+  const compressed=insertSystemSignal(baseCompressed,signal);
+
+  const invariantReport=invariants.evaluate(fileCompacted.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
+  if(options.strictInvariants===true&&!invariantReport.valid) {
+    invariants.assert(fileCompacted.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
+  }
+
+  const report=buildReport(fileCompacted.messages,compressed,resolved);
   report.invariants=invariantReport;
   report.transcriptRepair={repaired:repaired.repaired};
   report.fileReads={replaced:fileCompacted.replaced,workingSetFiles:workingSet?workingSet.split('\n').length-1:0};
+  report.awareness={emitted:Boolean(signal)};
+
   if(report.savings?.tokens>0) awareness.record(sessionKey,report);
   runtimeMetrics.touch(sessionKey,report);
   return {messages:compressed,report,options:resolved,invariants:invariantReport};
 }
 
-module.exports={requestOutputReserve,resolveOptions,compressAndRecord};
+module.exports={requestOutputReserve,resolveOptions,insertSystemSignal,buildReport,compressAndRecord};
