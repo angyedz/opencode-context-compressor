@@ -37,15 +37,26 @@ function snapshot(sessionKey){
   return {epoch:item.epoch,lastAt:item.lastAt,last:item.last?{...item.last}:null};
 }
 
+function signalMessage(epoch,savedTokens){
+  return {
+    role:'system',
+    content:`[Context runtime] Compaction epoch ${epoch}: ~${Math.max(0,Math.round(Number(savedTokens)||0))} tokens removed. Historical compacted material can omit exact detail; re-check critical files/tool state when precision matters.`,
+  };
+}
+
+function previewSignal(sessionKey,report={},minSavedTokens=512){
+  const saved=Number(report?.savings?.tokens||0);
+  if(!Number.isFinite(saved)||saved<minSavedTokens) return null;
+  const item=snapshot(sessionKey);
+  return signalMessage(item.epoch+1,saved);
+}
+
 function systemSignal(sessionKey){
   const item=snapshot(sessionKey);
   if(!item.epoch||!item.last) return null;
-  return {
-    role:'system',
-    content:`[Context runtime] Compaction epoch ${item.epoch} completed. Approximately ${item.last.savedTokens} tokens were removed. Historical compacted material may be incomplete; re-check critical files/tool state when exact details matter.`,
-  };
+  return signalMessage(item.epoch,item.last.savedTokens);
 }
 
 function clear(sessionKey){state.delete(String(sessionKey||'default'));}
 
-module.exports={record,snapshot,systemSignal,clear};
+module.exports={record,snapshot,signalMessage,previewSignal,systemSignal,clear};
