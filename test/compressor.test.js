@@ -386,3 +386,16 @@ test('rescue can recover a one-hop dependency even when active text does not nam
   const rescued=rescueRelevantTurns(turns,'Fix src/api/router.js auth handling',2600);
   assert.match(JSON.stringify(rescued),/src\/auth\/middleware\.js/);
 });
+
+
+test('error codes become graph entities for debugging continuity', () => {
+  const entities=factEntities('src/net/client.js connectTls() failed with ERR_TLS_CERT_ALTNAME_INVALID in test:tls-proxy');
+  assert.ok(entities.includes('err_tls_cert_altname_invalid'));
+  assert.ok(entities.includes('test:tls-proxy'));
+  const turns=[
+    [{role:'assistant',content:'src/api/client.js calls src/net/client.js connectTls().'}],
+    [{role:'assistant',content:'src/net/client.js connectTls() failed with ERR_TLS_CERT_ALTNAME_INVALID.'}],
+  ];
+  const ranked=collectRankedAnchors(turns,'debug src/api/client.js TLS',5).join('\n');
+  assert.match(ranked,/ERR_TLS_CERT_ALTNAME_INVALID/);
+});
