@@ -72,3 +72,15 @@ test('Gemini function response before call is rejected', () => {
   assert.equal(report.valid,false);
   assert.equal(report.gemini.orderViolations.length,1);
 });
+
+
+test('strict historical token cap is never inflated by minimum char defaults', () => {
+  assert.equal(budget.deriveCharBudget({ maxChars: 16000, maxTokens: 256 }), 819);
+});
+
+test('token calibration scale tightens historical char admission', () => {
+  const raw=budget.deriveCharBudget({ maxChars: 16000, maxTokens: 2000, tokenScale: 1 });
+  const calibrated=budget.deriveCharBudget({ maxChars: 16000, maxTokens: 2000, tokenScale: 2 });
+  assert.equal(raw,6400);
+  assert.equal(calibrated,3200);
+});
