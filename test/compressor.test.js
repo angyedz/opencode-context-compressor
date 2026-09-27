@@ -18,6 +18,7 @@ const {
   scoreFact,
   buildStateSnapshot,
   factEntities,
+  recentBudgetRatio,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -240,4 +241,18 @@ test('newer facts supersede stale facts about the same entity/topic', () => {
   const anchors = collectRankedAnchors(turns, 'continue src/server/config.js', 10).join('\n');
   assert.match(anchors, /8080/);
   assert.doesNotMatch(anchors, /3000/);
+});
+
+
+test('adaptive hot window spends less exact budget on giant tool logs and more on short turns', () => {
+  const concise = Array.from({length:4}, (_,i) => [
+    { role:'user', content:'edit '+i },
+    { role:'assistant', content:'done '+i },
+  ]);
+  const noisy = Array.from({length:4}, (_,i) => [
+    { role:'user', content:'run '+i },
+    { role:'assistant', content:'tool', tool_calls:[{id:'x'+i,type:'function',function:{name:'shell',arguments:'{}'}}] },
+    { role:'tool', tool_call_id:'x'+i, content:'log '.repeat(4000) },
+  ]);
+  assert.ok(recentBudgetRatio(concise, 16000) > recentBudgetRatio(noisy, 16000));
 });
