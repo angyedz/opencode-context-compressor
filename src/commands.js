@@ -1,6 +1,6 @@
 'use strict';
 
-const { spawn, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 const memoStore = require('./memo-store');
 const profileStore = require('./profile-store');
@@ -9,24 +9,6 @@ const disabledSessions = new Set();
 const sessionLimits = new Map();
 
 const COMMAND_RE = /^(?:\$|\/)(?:context-compressor|compressor|model-memo|memo|history|search|remember|forget|profile|reset|help)\b/i;
-
-function triggerSelfUpdate() {
-  const repoDir = path.resolve(__dirname, '..');
-  const script = [
-    'set -e',
-    `cd "${repoDir.replace(/"/g, '\\"')}"`,
-    'git fetch origin master',
-    'git merge --ff-only origin/master',
-    'npm install --omit=dev',
-    'systemctl --user restart context-compressor.service',
-  ].join(' && ');
-
-  const child = spawn('/bin/bash', ['-lc', script], {
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
-}
 
 function checkUpdates() {
   const repoDir = path.resolve(__dirname, '..');
@@ -188,8 +170,7 @@ function executeCommand(messages, sessionKey = 'default') {
   }
 
   if (cmd === 'update' || cmd === 'upgrade') {
-    triggerSelfUpdate();
-    return '🚀 Fast-forward self-update started. The service will restart after dependencies are refreshed.';
+    return 'Update with your package manager (for example `npm update -g opencode-context-compressor`) and start `opencode-cc` again. No background service restart is required.';
   }
 
   return [
@@ -205,7 +186,8 @@ function executeCommand(messages, sessionKey = 'default') {
     '- `$profile` — show durable profile facts',
     '- `$forget <query>` — remove durable profile facts',
     '- `$reset` — reset temporary session state only',
-    '- `$compressor check-update` / `update` — update the local service',
+    '- `$compressor check-update` — compare this checkout with origin/master',
+    '- `$compressor update` — show the safe package-manager update command',
   ].join('\n');
 }
 
