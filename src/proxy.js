@@ -21,6 +21,7 @@ const url = require('url');
 
 const formats = require('./formats');
 const runtimePipeline = require('./context/runtime-pipeline');
+const tokenCalibration = require('./context/token-calibration');
 const commands = require('./commands');
 const memoStore = require('./memo-store');
 const { getDomainCert, getCA, CA_CERT_PATH } = require('./ca');
@@ -178,15 +179,23 @@ async function handleAiRequest(req, res, targetUrl, body) {
   }
 
   // ── 3. Normal request to external LLM: compress context → forward ──────
-  const compressed = runtimePipeline.compressAndRecord(msgs, sessionKey, { requestBody: parsed }).messages;
-  const newBody = Buffer.from(JSON.stringify(formats.rebuildBody(parsed, compressed, format)));
+  const provider = targetUrl.hostname || req.headers.host || 'provider';
+  const model = parsed.model || '';
+  const runtime = runtimePipeline.compressAndRecord(msgs, sessionKey, { requestBody: parsed, provider, model });
+  const newBody = Buffer.from(JSON.stringify(formats.rebuildBody(parsed, runtime.messages, format)));
 
-  return forwardRequest(req, res, newBody, targetUrl);
+  return forwardRequest(req, res, newBody, targetUrl, {
+    calibration: {
+      provider,
+      model,
+      estimatedPromptTokens: runtime.report?.after?.tokens || 0,
+    },
+  });
 }
 
 // ─── HTTP forwarding ────────────────────────────────────────────────────────
 
-function forwardRequest(req, res, body, targetUrl) {
+function forwardRequest(req, res, body, targetUrl, context = {}) {
   const isHttps = targetUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
   const port = targetUrl.port || (isHttps ? 443 : 80);
@@ -222,14 +231,35 @@ function forwardRequest(req, res, body, targetUrl) {
     if (res.socket) res.socket.setNoDelay(true);
     if (proxyRes.socket) proxyRes.socket.setNoDelay(true);
 
+    const calibration = context.calibration;
+    const canInspectUsage = calibration && !String(proxyRes.headers['content-encoding'] || '').match(/gzip|br|deflate/i);
+    let usageHead = '';
+    let usageTail = '';
+
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
     proxyRes.on('data', (chunk) => {
+      if (canInspectUsage) {
+        const piece = chunk.toString('utf8');
+        if (usageHead.length < 65536) usageHead += piece.slice(0, 65536 - usageHead.length);
+        usageTail = (usageTail + piece).slice(-131072);
+      }
       res.write(chunk);
     });
 
     proxyRes.on('end', () => {
+      if (canInspectUsage) {
+        const actual = tokenCalibration.extractUsageFromText(usageHead + '\n' + usageTail);
+        if (actual !== null && calibration.estimatedPromptTokens > 0) {
+          tokenCalibration.record(
+            calibration.provider,
+            calibration.model,
+            calibration.estimatedPromptTokens,
+            actual
+          );
+        }
+      }
       res.end();
     });
 
