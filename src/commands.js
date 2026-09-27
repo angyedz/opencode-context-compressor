@@ -8,6 +8,7 @@ const diagnostics = require('./context/diagnostics');
 const runtimeMetrics = require('./context/runtime-metrics');
 const compressor = require('./compressor');
 const selectionExplain = require('./context/selection-explain');
+const compactionAwareness = require('./context/compaction-awareness');
 
 const disabledSessions = new Set();
 const sessionLimits = new Map();
@@ -152,7 +153,7 @@ function executeCommand(messages, sessionKey = 'default') {
     const profile = profileStore.stats();
     const runtime = runtimeMetrics.get(sessionKey);
     const aggregate = runtimeMetrics.aggregate();
-    const last = runtimeMetrics.get(sessionKey);
+    const awareness = compactionAwareness.snapshot(sessionKey);
     return [
       '⚡ **Context Compressor Status**',
       '',
@@ -161,14 +162,15 @@ function executeCommand(messages, sessionKey = 'default') {
       `- Input window / output reserve: **${getSessionInputLimit(sessionKey)?.toLocaleString() || 'provider/default'} / ${getSessionOutputReserve(sessionKey).toLocaleString()} tokens**`,
       `- Active-session memory: **${stats.entries} items across ${stats.sessions} session(s)** (temporary, non-persistent)`,
       `- Durable profile memory: **${profile.facts} facts**`,
-      runtime ? `- Last compression: **~${runtime.before.tokens.toLocaleString()} → ~${runtime.after.tokens.toLocaleString()} tokens** (${runtime.savings.tokenPercent.toFixed(1)}% estimated savings)` : '- Last compression: no runtime sample yet',
-      runtime ? `- Last quality score: **${runtime.quality.score}/100**, protocol=${runtime.quality.protocolValid ? 'valid' : 'INVALID'}` : '',
+      runtime
+        ? `- Last compression: **~${runtime.before.tokens.toLocaleString()} → ~${runtime.after.tokens.toLocaleString()} tokens** (${runtime.savings.tokenPercent.toFixed(1)}% saved, ${runtime.savings.ratio.toFixed(2)}× smaller)`
+        : '- Last compression: no runtime sample yet',
+      runtime
+        ? `- Last quality: **${runtime.quality.score}/100**, protocol=${runtime.quality.protocolValid ? 'valid' : 'INVALID'}, provenance retained/removed/synthesized=${runtime.provenance?.retained ?? 0}/${runtime.provenance?.removed ?? 0}/${runtime.provenance?.synthesized ?? 0}`
+        : '',
+      `- Compaction epoch: **${awareness.epoch}**`,
       `- Runtime aggregate: **~${aggregate.savedTokens.toLocaleString()} estimated tokens saved** across ${aggregate.sessions} active session metric(s)`,
-      ...(last ? [
-        `- Last compression: **${last.before.tokens.toLocaleString()} → ${last.after.tokens.toLocaleString()} est. tokens** (${last.savings.tokenPercent.toFixed(1)}% saved, ${last.savings.ratio.toFixed(2)}× smaller)`,
-        `- Last quality score: **${last.quality.score}/100**; protocol=${last.quality.protocolValid ? 'valid' : 'INVALID'}`,
-      ] : []),
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   if (cmd === 'explain' || cmd === 'diagnostics' || cmd === 'debug-context') {
@@ -246,6 +248,8 @@ function executeCommand(messages, sessionKey = 'default') {
     sessionTokenLimits.delete(sessionKey);
     sessionInputLimits.delete(sessionKey);
     sessionOutputReserves.delete(sessionKey);
+    runtimeMetrics.clear(sessionKey);
+    compactionAwareness.clear(sessionKey);
     return '🔄 Reset temporary state for the active session. Durable profile preferences were kept.';
   }
 
