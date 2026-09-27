@@ -9,6 +9,7 @@ const stateEngine = require('./context/state-engine');
 const contextPlanner = require('./context/context-planner');
 const semanticIndex = require('./context/semantic-index');
 const relevanceEngine = require('./context/relevance-engine');
+const analysisContext = require('./context/analysis-context');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -433,7 +434,7 @@ function lifecycleTopic(fact) {
 
 function collectRankedAnchorRecords(turns, activeText = '', limit = 24) {
   const best = new Map();
-  const dependencyMap = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 2);
+  const dependencyMap = analysisContext.dependencies(turns, activeText, 2);
   let recency = 0;
   for (let ti = (turns || []).length - 1; ti >= 0; ti -= 1) {
     recency += 1;
@@ -593,8 +594,8 @@ function recentBudgetRatio(turns, maxChars) {
 function rescueRelevantTurns(turns, activeText, budget) {
   const activeEntities = new Set(factEntities(activeText));
   if (!activeEntities.size || budget < 400) return [];
-  const dependencyMap = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 1);
-  const indexed = semanticIndex.buildSemanticIndex(turns);
+  const dependencyMap = analysisContext.dependencies(turns, activeText, 1);
+  const indexed = analysisContext.index(turns);
   const candidates = [];
   for (const row of indexed) {
     let relevance = 0;
@@ -623,7 +624,7 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
   const recent = (turns || []).slice(-4).flat();
   const recentAverageSize = recent.length ? messagesSize(recent) / recent.length : 0;
   const structuredDensity = recent.length ? recent.filter((m) => hasStructuredContent(m) || m.tool_calls || m.function_call || m.role === 'tool').length / recent.length : 0;
-  const dependencyCandidates = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 1).size;
+  const dependencyCandidates = analysisContext.dependencies(turns, activeText, 1).size;
   const plan = contextPlanner.planContext({ maxChars, recentDensity: structuredDensity, recentAverageSize, dependencyCandidates, structuredDensity, hasWorkingState: true });
   const recentRatio = plan.ratios.recent;
   const recentBudget = plan.budgets.recent;
