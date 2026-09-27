@@ -4,6 +4,7 @@ const compressor=require('../compressor');
 const commands=require('../commands');
 const compressionReport=require('./compression-report');
 const runtimeMetrics=require('./runtime-metrics');
+const invariants=require('./invariants');
 
 function requestOutputReserve(body){
   const candidates=[
@@ -37,6 +38,8 @@ function resolveOptions(sessionKey,options={}){
 function compressAndRecord(messages,sessionKey,options={}){
   const resolved=resolveOptions(sessionKey,options);
   const compressed=compressor.compressMessages(messages,resolved);
+  const invariantReport=invariants.evaluate(messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
+  if(options.strictInvariants===true&&!invariantReport.valid) invariants.assert(messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
   const report=compressionReport.publicReport(
     compressionReport.buildCompressionReport(messages,compressed,{
       maxChars:resolved.maxChars,
@@ -45,8 +48,9 @@ function compressAndRecord(messages,sessionKey,options={}){
       reserveOutputTokens:resolved.reserveOutputTokens,
     })
   );
+  report.invariants=invariantReport;
   runtimeMetrics.touch(sessionKey,report);
-  return {messages:compressed,report,options:resolved};
+  return {messages:compressed,report,options:resolved,invariants:invariantReport};
 }
 
 module.exports={requestOutputReserve,resolveOptions,compressAndRecord};
