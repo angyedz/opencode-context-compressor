@@ -40,9 +40,11 @@ function generateCA() {
   ]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
 
-  fs.mkdirSync(CA_DIR, { recursive: true });
-  fs.writeFileSync(CA_CERT_PATH, forge.pki.certificateToPem(cert), 'utf8');
-  fs.writeFileSync(CA_KEY_PATH, forge.pki.privateKeyToPem(keys.privateKey), 'utf8');
+  fs.mkdirSync(CA_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CA_CERT_PATH, forge.pki.certificateToPem(cert), { encoding: 'utf8', mode: 0o644 });
+  fs.writeFileSync(CA_KEY_PATH, forge.pki.privateKeyToPem(keys.privateKey), { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(CA_DIR, 0o700); } catch (_) {}
+  try { fs.chmodSync(CA_KEY_PATH, 0o600); } catch (_) {}
   console.log(`✅ Root CA saved to ${CA_CERT_PATH}`);
   return { cert, key: keys.privateKey, certPem: forge.pki.certificateToPem(cert) };
 }
