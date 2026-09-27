@@ -23,7 +23,12 @@ function splitTurns(messages){
 }
 
 function recentUser(messages){
-  for(let i=(messages||[]).length-1;i>=0;i--) if(messages[i]?.role==='user') return safeText(messages[i].content);
+  for(let i=(messages||[]).length-1;i>=0;i--){
+    if(messages[i]?.role!=='user') continue;
+    const text=safeText(messages[i].content).trim();
+    if(/^(?:\$|\/)(?:context-compressor|compressor|model-memo|memo|history|search|remember|forget|profile|reset|help)\b/i.test(text)) continue;
+    return text;
+  }
   return '';
 }
 
