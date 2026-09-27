@@ -3,6 +3,10 @@
 const profileStore = require('./profile-store');
 const tokenBudget = require('./context/token-budget');
 const protocolIntegrity = require('./context/protocol-integrity');
+const semanticGraph = require('./context/semantic-graph');
+const toolCompactor = require('./context/tool-compactor');
+const stateEngine = require('./context/state-engine');
+const contextPlanner = require('./context/context-planner');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -442,7 +446,7 @@ function lifecycleTopic(fact) {
 
 function collectRankedAnchors(turns, activeText = '', limit = 24) {
   const best = new Map();
-  const dependencyMap = dependencyDistances(buildDependencyGraph(turns), activeText, 2);
+  const dependencyMap = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 2);
   let recency = 0;
   for (let ti = (turns || []).length - 1; ti >= 0; ti -= 1) {
     recency += 1;
@@ -523,22 +527,7 @@ function collectHistoricalAnchors(turns, activeText = '') {
 }
 
 function buildStateSnapshot(turns, activeText = '') {
-  const anchors = collectRankedAnchors(turns, activeText, 18);
-  const buckets = { blockers: [], failed_attempts: [], constraints: [], pending: [], implementation: [] };
-  for (const fact of anchors) {
-    const lower = fact.toLowerCase();
-    if (/\b(tried|attempted|approach|workaround)\b/.test(lower) && /\b(failed|did not work|didn't work|unsuccessful|broken)\b/.test(lower)) buckets.failed_attempts.push(fact);
-    else if (/\b(error|failed|exception|panic|regression|broken|failure|blocked)\b/.test(lower)) buckets.blockers.push(fact);
-    else if (/\b(decision|must|require|required|contract|compatib|invariant|signature|schema)\b/.test(lower)) buckets.constraints.push(fact);
-    else if (/\b(todo|fixme|next|remaining)\b/.test(lower)) buckets.pending.push(fact);
-    else buckets.implementation.push(fact);
-  }
-  const lines = ['### Working state'];
-  for (const [name, facts] of Object.entries(buckets)) {
-    if (!facts.length) continue;
-    lines.push(`- ${name}: ${facts.slice(0, 6).join(' ; ')}`);
-  }
-  return lines.length > 1 ? lines.join('\n') : '';
+  return stateEngine.renderWorkingState(collectRankedAnchors(turns, activeText, 18));
 }
 
 function summarizeTurns(turns, activeText = '') {
@@ -604,7 +593,7 @@ function recentBudgetRatio(turns, maxChars) {
 function rescueRelevantTurns(turns, activeText, budget) {
   const activeEntities = new Set(factEntities(activeText));
   if (!activeEntities.size || budget < 400) return [];
-  const dependencyMap = dependencyDistances(buildDependencyGraph(turns), activeText, 1);
+  const dependencyMap = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 1);
   const candidates = [];
   for (let i = 0; i < (turns || []).length; i += 1) {
     const turn = turns[i];
@@ -628,8 +617,13 @@ function rescueRelevantTurns(turns, activeText, budget) {
 function boundRecentHistory(turns, maxChars, activeText = '') {
   let selected = [];
   let used = 0;
-  const recentRatio = recentBudgetRatio(turns, maxChars);
-  const recentBudget = Math.floor(maxChars * recentRatio);
+  const recent = (turns || []).slice(-4).flat();
+  const recentAverageSize = recent.length ? messagesSize(recent) / recent.length : 0;
+  const structuredDensity = recent.length ? recent.filter((m) => hasStructuredContent(m) || m.tool_calls || m.function_call || m.role === 'tool').length / recent.length : 0;
+  const dependencyCandidates = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 1).size;
+  const plan = contextPlanner.planContext({ maxChars, recentDensity: structuredDensity, recentAverageSize, dependencyCandidates, structuredDensity, hasWorkingState: true });
+  const recentRatio = plan.ratios.recent;
+  const recentBudget = plan.budgets.recent;
 
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
@@ -801,7 +795,7 @@ function compressMessages(rawMessages, options = {}) {
     return turn.map((message) => transformMessage(message, age));
   });
 
-  const agedTurns = collapseRepeatedToolOutputs(agedTurnsRaw);
+  const agedTurns = toolCompactor.collapseRepeatedToolOutputs(agedTurnsRaw, { isStructured: hasStructuredContent });
   const agedHistory = agedTurns.flat();
   const trigger = Math.min(COMPACT_TRIGGER_CHARS, maxChars);
 
