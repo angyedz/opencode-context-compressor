@@ -111,3 +111,33 @@ test('compression ratio is extreme on stale tool-heavy history without touching 
   assert.ok(after < before / 20, 'expected at least 20x request-size reduction on synthetic stale logs');
   assert.ok(messagesSize(historicalMessages(compressed)) <= 6000);
 });
+
+
+test('structured multimodal and Anthropic-style blocks are byte-for-byte preserved when retained', () => {
+  const structured = {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'inspect this image' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+    ],
+  };
+  const toolUse = {
+    role: 'assistant',
+    content: [{ type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'a.js' } }],
+  };
+  const input = [];
+  for (let i = 0; i < 10; i += 1) {
+    input.push({ role: 'user', content: 'noise ' + 'x'.repeat(1000) });
+    input.push({ role: 'assistant', content: 'noise reply ' + 'y'.repeat(1000) });
+  }
+  input.push(structured, toolUse, {
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }],
+  }, { role: 'assistant', content: 'done' }, { role: 'user', content: 'continue' });
+
+  const out = compressMessages(input, { maxChars: 9000 });
+  const retainedStructured = out.find((m) => Array.isArray(m.content) && m.content.some((p) => p?.type === 'image'));
+  const retainedTool = out.find((m) => Array.isArray(m.content) && m.content.some((p) => p?.type === 'tool_use'));
+  assert.deepEqual(retainedStructured, structured);
+  assert.deepEqual(retainedTool, toolUse);
+});
