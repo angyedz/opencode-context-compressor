@@ -7,7 +7,8 @@ const net = require('net');
 const path = require('path');
 const { CA_CERT_PATH, getCA } = require('../src/ca');
 
-const DEFAULT_PORT = Number(process.env.CONTEXT_COMPRESSOR_PORT || 3266);
+const configuredPort = process.env.CONTEXT_COMPRESSOR_PORT;
+const DEFAULT_PORT = configuredPort === '0' ? 0 : Number(configuredPort || 3266);
 let proxyPort = DEFAULT_PORT;
 let proxyUrl = `http://127.0.0.1:${proxyPort}`;
 const proxyScript = path.join(__dirname, '..', 'src', 'proxy.js');
@@ -34,6 +35,10 @@ function health(port, timeoutMs = 500) {
 
 function freePort(start = DEFAULT_PORT) {
   return new Promise((resolve, reject) => {
+    if (start === 0) {
+      const server = net.createServer(); server.unref(); server.once('error', reject);
+      return server.listen(0, '127.0.0.1', () => { const port=server.address().port; server.close(() => resolve(port)); });
+    }
     const tryPort = (port) => {
       const server = net.createServer();
       server.unref();
