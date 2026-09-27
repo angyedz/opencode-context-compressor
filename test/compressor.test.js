@@ -22,6 +22,7 @@ const {
   lifecycleState,
   stableTextFingerprint,
   collapseRepeatedToolOutputs,
+  rescueRelevantTurns,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -317,4 +318,15 @@ test('working state preserves failed approaches so the agent does not loop', () 
   const snapshot=buildStateSnapshot(turns,'fix src/net/client.js TLS');
   assert.match(snapshot,/failed_attempts:/);
   assert.match(snapshot,/disable TLS verification/i);
+});
+
+
+test('old compact turn is rescued when it directly matches active file/function entities', () => {
+  const turns=[
+    [{role:'user',content:'Edit src/auth/session.js validateSession(token).'}, {role:'assistant',content:'The edge case is refresh-token expiry ordering.'}],
+    ...Array.from({length:12},(_,i)=>[{role:'user',content:'unrelated '+i},{role:'assistant',content:'done '+i}]),
+  ];
+  const rescued=rescueRelevantTurns(turns,'Fix validateSession(token) in src/auth/session.js',3000);
+  assert.ok(rescued.length>=1);
+  assert.match(JSON.stringify(rescued[0]),/refresh-token expiry ordering/);
 });
