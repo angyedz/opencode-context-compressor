@@ -106,7 +106,7 @@ class SessionMemoStore {
     for (const message of this._filterMessages(rawMessages)) {
       if (!message?.role) continue;
       const text=messageToMemoText(message); const timestamp=Number(message.timestamp)||Date.now();
-      if (message.role==='user') { step++; substep=0; items.push({type:'step',stepIndex:step,role:'user',text:text.slice(0,5000),timestamp}); }
+      if (message.role==='user') { step++; substep=0; items.push({type:'step',stepIndex:step,role:'user',text:text.slice(0,MAX_STORED_TEXT),timestamp}); }
       else if (message.role==='tool') { substep++; items.push({type:'substep',stepIndex:Math.max(step,1),substepIndex:substep,toolName:message.name||message.tool_name||'tool',text,timestamp}); }
       else if (message.role==='assistant') { const calls=Array.isArray(message.tool_calls)&&message.tool_calls.length; if(text||calls) items.push({type:calls?'assistant_tool':'step_reply',stepIndex:Math.max(step,1),role:'assistant',text,timestamp}); }
       else { substep++; items.push({type:'substep',stepIndex:Math.max(step,1),substepIndex:substep,toolName:message.role,text,timestamp}); }
