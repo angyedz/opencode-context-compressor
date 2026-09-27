@@ -265,6 +265,58 @@ function semanticFacts(text) {
   return [...new Set(important)].slice(0, 8).join(' | ').slice(0, 900);
 }
 
+function normalizeAnchor(fact) {
+  return String(fact || '').replace(/\s+/g, ' ').trim();
+}
+
+function anchorKey(fact) {
+  return normalizeAnchor(fact)
+    .toLowerCase()
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:t[^ ]+)?\b/g, '<date>')
+    .replace(/\b\d+ms\b/g, '<duration>')
+    .replace(/\s+/g, ' ');
+}
+
+function scoreFact(fact, activeText = '') {
+  const text = normalizeAnchor(fact);
+  const lower = text.toLowerCase();
+  let score = 1;
+  if (/\b(error|failed|exception|panic|regression|broken|failure)\b/.test(lower)) score += 7;
+  if (/\b(decision|decided|must|require|required|contract|compatib|invariant)\b/.test(lower)) score += 6;
+  if (/\b(todo|fixme|next|remaining|blocked)\b/.test(lower)) score += 5;
+  if (/(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+/.test(text)) score += 5;
+  if (/[A-Za-z_$][A-Za-z0-9_$]*\([^)]{0,120}\)/.test(text)) score += 4;
+  if (/\b(test|api|endpoint|schema|signature|branch|commit)\b/.test(lower)) score += 3;
+
+  const activeTokens = new Set(String(activeText || '').toLowerCase().match(/[a-z0-9_./-]{4,}/g) || []);
+  const factTokens = lower.match(/[a-z0-9_./-]{4,}/g) || [];
+  for (const token of factTokens) if (activeTokens.has(token)) score += 3;
+  return score;
+}
+
+function collectRankedAnchors(turns, activeText = '', limit = 24) {
+  const best = new Map();
+  let recency = 0;
+  for (let ti = (turns || []).length - 1; ti >= 0; ti -= 1) {
+    recency += 1;
+    for (const message of turns[ti]) {
+      const facts = semanticFacts(extractText(message?.content));
+      for (const raw of facts ? facts.split(' | ') : []) {
+        const fact = normalizeAnchor(raw);
+        if (!fact) continue;
+        const key = anchorKey(fact);
+        const value = { fact, score: scoreFact(fact, activeText) + Math.max(0, 4 - Math.floor(recency / 3)), recency };
+        const old = best.get(key);
+        if (!old || value.score > old.score || value.recency < old.recency) best.set(key, value);
+      }
+    }
+  }
+  return [...best.values()]
+    .sort((a, b) => b.score - a.score || a.recency - b.recency)
+    .slice(0, limit)
+    .map((entry) => entry.fact);
+}
+
 function summarizeMessage(message) {
   const role = String(message?.role || 'message').toUpperCase();
   let text = extractText(message?.content).replace(/\s+/g, ' ').trim();
@@ -288,23 +340,11 @@ function summarizeMessage(message) {
   return `[${role}] ${excerpt}${facts && !excerpt.includes(facts) ? ` | KEY: ${facts}` : ''}`;
 }
 
-function collectHistoricalAnchors(turns) {
-  const anchors = [];
-  for (const turn of turns || []) {
-    for (const message of turn) {
-      const facts = semanticFacts(extractText(message?.content));
-      if (!facts) continue;
-      for (const fact of facts.split(' | ')) {
-        const normalized = fact.trim();
-        if (normalized && !anchors.includes(normalized)) anchors.push(normalized);
-        if (anchors.length >= 24) return anchors;
-      }
-    }
-  }
-  return anchors;
+function collectHistoricalAnchors(turns, activeText = '') {
+  return collectRankedAnchors(turns, activeText, 24);
 }
 
-function summarizeTurns(turns) {
+function summarizeTurns(turns, activeText = '') {
   const lines = [];
   let number = 1;
 
@@ -316,7 +356,7 @@ function summarizeTurns(turns) {
     }
   }
 
-  const anchors = collectHistoricalAnchors(turns);
+  const anchors = collectHistoricalAnchors(turns, activeText);
   const anchorBlock = anchors.length
     ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
     : '';
@@ -349,7 +389,7 @@ function trimMessageTo(message, maxSize) {
   return { ...message, content: replaceTextContent(message.content, next.slice(0, allowedText)) };
 }
 
-function boundRecentHistory(turns, maxChars) {
+function boundRecentHistory(turns, maxChars, activeText = '') {
   let selected = [];
   let used = 0;
 
@@ -382,7 +422,7 @@ function boundRecentHistory(turns, maxChars) {
 
   const recentSize = messagesSize(recentFlat);
   const available = Math.max(0, maxChars - recentSize);
-  let summaryText = summarizeTurns(older);
+  let summaryText = summarizeTurns(older, activeText);
   let summary = summaryText ? makeHistorySummary(summaryText) : null;
 
   if (summary && messageSize(summary) > available) {
@@ -390,7 +430,7 @@ function boundRecentHistory(turns, maxChars) {
     const textBudget = Math.max(0, available - overhead - 32);
 
     if (textBudget > 240) {
-      const anchors = collectHistoricalAnchors(older);
+      const anchors = collectHistoricalAnchors(older, activeText);
       const anchorText = anchors.length
         ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
         : '';
@@ -492,11 +532,11 @@ function compressMessages(rawMessages, options = {}) {
   if (messagesSize(agedHistory) <= trigger) {
     boundedHistory = agedHistory;
   } else {
-    boundedHistory = boundRecentHistory(agedTurns, maxChars);
+    boundedHistory = boundRecentHistory(agedTurns, maxChars, extractText(activeTurn[0]?.content));
   }
 
   if (messagesSize(boundedHistory) > maxChars) {
-    boundedHistory = boundRecentHistory(splitTurns(boundedHistory), maxChars);
+    boundedHistory = boundRecentHistory(splitTurns(boundedHistory), maxChars, extractText(activeTurn[0]?.content));
   }
 
   return injectSystemDirective([
@@ -519,6 +559,8 @@ module.exports = {
   messagesSize,
   semanticFacts,
   collectHistoricalAnchors,
+  collectRankedAnchors,
+  scoreFact,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
