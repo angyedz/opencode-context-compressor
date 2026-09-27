@@ -3,10 +3,13 @@
 
 const { spawn, spawnSync } = require('child_process');
 const http = require('http');
+const net = require('net');
 const path = require('path');
 const { CA_CERT_PATH, getCA } = require('../src/ca');
 
-const proxyUrl = 'http://127.0.0.1:3266';
+const DEFAULT_PORT = Number(process.env.CONTEXT_COMPRESSOR_PORT || 3266);
+let proxyPort = DEFAULT_PORT;
+let proxyUrl = `http://127.0.0.1:${proxyPort}`;
 const proxyScript = path.join(__dirname, '..', 'src', 'proxy.js');
 
 function commandExists(command) {
@@ -14,17 +17,38 @@ function commandExists(command) {
   return !probe.error;
 }
 
+function health(port, timeoutMs = 500) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: timeoutMs }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try { const data = JSON.parse(body); resolve(res.statusCode === 200 && data.service === 'context-compressor-proxy'); }
+        catch (_) { resolve(false); }
+      });
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+function freePort(start = DEFAULT_PORT) {
+  return new Promise((resolve, reject) => {
+    const tryPort = (port) => {
+      const server = net.createServer();
+      server.unref();
+      server.once('error', (err) => err.code === 'EADDRINUSE' && port < start + 20 ? tryPort(port + 1) : reject(err));
+      server.listen(port, '127.0.0.1', () => server.close(() => resolve(port)));
+    };
+    tryPort(start);
+  });
+}
+
 function waitForProxy(timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const probe = () => {
-      const req = http.get(proxyUrl + '/health', { timeout: 500 }, (res) => {
-        res.resume();
-        if (res.statusCode === 200) return resolve();
-        retry();
-      });
-      req.on('error', retry);
-      req.on('timeout', () => { req.destroy(); retry(); });
+      health(proxyPort).then((ok) => ok ? resolve() : retry());
     };
     const retry = () => {
       if (Date.now() >= deadline) return reject(new Error('context-compressor proxy did not become healthy'));
@@ -43,13 +67,13 @@ async function main() {
   getCA();
 
   let proxy = null;
-  try {
-    await waitForProxy(300);
-  } catch (_) {
+  if (!await health(proxyPort, 300)) {
+    proxyPort = await freePort(DEFAULT_PORT);
+    proxyUrl = `http://127.0.0.1:${proxyPort}`;
     proxy = spawn(process.execPath, [proxyScript], {
       stdio: ['ignore', 'inherit', 'inherit'],
       windowsHide: true,
-      env: { ...process.env },
+      env: { ...process.env, PROXY_PORT: String(proxyPort) },
     });
     proxy.once('exit', (code) => {
       if (code && !process.exitCode) process.exitCode = code;
