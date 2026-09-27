@@ -44,13 +44,18 @@ function estimateMessagesTokens(messages) {
   return (messages || []).reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 }
 
-function deriveCharBudget({ maxChars, maxTokens, defaultChars = 16000, minChars = 2000 } = {}) {
+function deriveCharBudget({ maxChars, maxTokens, tokenScale = 1, defaultChars = 16000, minChars = 2000 } = {}) {
   const chars = Number(maxChars);
   const tokens = Number(maxTokens);
-  const charLimit = Number.isFinite(chars) && chars > 0 ? chars : defaultChars;
-  // Conservative mixed coding/chat conversion. Exact accounting remains provider-side.
-  const tokenLimitAsChars = Number.isFinite(tokens) && tokens > 0 ? Math.floor(tokens * 3.2) : Infinity;
-  return Math.max(minChars, Math.min(charLimit, tokenLimitAsChars));
+  const scale = Math.max(0.25, Math.min(4, Number(tokenScale) || 1));
+  const explicitChars = Number.isFinite(chars) && chars > 0;
+  const charLimit = explicitChars ? chars : Math.max(minChars, defaultChars);
+  // Token limits are strict caps. Calibration >1 means the raw estimator was
+  // undercounting, so fewer characters may be admitted for the same token cap.
+  const tokenLimitAsChars = Number.isFinite(tokens) && tokens > 0
+    ? Math.max(0, Math.floor((tokens * 3.2) / scale))
+    : Infinity;
+  return Math.max(0, Math.min(charLimit, tokenLimitAsChars));
 }
 
 function budgetReport(messages, limits = {}) {
