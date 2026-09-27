@@ -26,6 +26,7 @@ const memoStore = require('./memo-store');
 const { getDomainCert, getCA, CA_CERT_PATH } = require('./ca');
 
 const PORT = Number(process.env.PROXY_PORT || 3266);
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 64 * 1024 * 1024);
 
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000, rejectUnauthorized: true });
@@ -64,11 +65,35 @@ async function isQwenFreeApi(hostname, port) {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', () => resolve(Buffer.alloc(0)));
+    let total = 0;
+    let settled = false;
+
+    req.on('data', (chunk) => {
+      if (settled) return;
+      total += chunk.length;
+      if (total > MAX_BODY_BYTES) {
+        settled = true;
+        const error = new Error(`Request body exceeds ${MAX_BODY_BYTES} bytes`);
+        error.statusCode = 413;
+        reject(error);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+
+    req.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
   });
 }
 
@@ -85,8 +110,17 @@ function isAiPath(pathname) {
 // ─── Core interceptor ───────────────────────────────────────────────────────
 
 async function handleAiRequest(req, res, targetUrl, body) {
-  let parsed = {};
-  try { parsed = JSON.parse(body); } catch (_) {}
+  const contentEncoding = String(req.headers['content-encoding'] || '').toLowerCase();
+  if (contentEncoding && contentEncoding !== 'identity') {
+    return forwardRequest(req, res, body, targetUrl);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch (_) {
+    return forwardRequest(req, res, body, targetUrl);
+  }
 
   const pathname = targetUrl.pathname || req.url || '';
   const format = formats.detectFormat(pathname, parsed);
@@ -108,6 +142,9 @@ async function handleAiRequest(req, res, targetUrl, body) {
     model: parsed.model || '',
   });
   const lastUserText = formats.getLastUserText(parsed, format);
+
+  // Refresh temporary recall from the exact request before handling commands or compaction.
+  memoStore.syncMessages(sessionKey, msgs);
 
   // ── 1. Command interception: ALWAYS answered by compressor directly (0 LLM calls) ──
   if (commands.isCommandMessage([{ role: 'user', content: lastUserText }])) {
@@ -144,7 +181,6 @@ async function handleAiRequest(req, res, targetUrl, body) {
   }
 
   // ── 3. Normal request to external LLM: compress context → forward ──────
-  memoStore.syncMessages(sessionKey, msgs);
   const disabled = commands.isCompressorDisabled(sessionKey);
   const maxChars = commands.getSessionLimit(sessionKey);
   const compressed = compressor.compressMessages(msgs, { disabled, maxChars });
@@ -236,7 +272,13 @@ const proxyServer = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ ok: true, service: 'context-compressor-proxy', port: PORT, ca: CA_CERT_PATH }));
   }
 
-  const body = await readBody(req);
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (error) {
+    res.writeHead(error.statusCode || 400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(error.statusCode === 413 ? 'Payload Too Large' : 'Bad Request');
+  }
   const targetUrl = url.parse(req.url.startsWith('http') ? req.url : `http://${req.headers.host}${req.url}`);
 
   if (req.method === 'POST' && isAiPath(targetUrl.pathname || req.url)) {
@@ -268,7 +310,13 @@ proxyServer.on('connect', (req, clientSocket, head) => {
     (mitmSocket) => {
       // Parse HTTP requests coming over the decrypted TLS socket
       const innerHttp = http.createServer(async (innerReq, innerRes) => {
-        const body = await readBody(innerReq);
+        let body;
+        try {
+          body = await readBody(innerReq);
+        } catch (error) {
+          innerRes.writeHead(error.statusCode || 400, { 'Content-Type': 'text/plain; charset=utf-8' });
+          return innerRes.end(error.statusCode === 413 ? 'Payload Too Large' : 'Bad Request');
+        }
         const pathname = innerReq.url || '/';
         const targetUrl = {
           protocol: 'https:',
