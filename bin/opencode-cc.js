@@ -22,6 +22,43 @@ function resolveCommand(command) {
   return null;
 }
 
+function mergeNoProxy(env) {
+  const existing = String(env.NO_PROXY || env.no_proxy || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const merged = [...new Set([...existing, 'localhost', '127.0.0.1', '::1'])].join(',');
+  return { NO_PROXY: merged, no_proxy: merged };
+}
+
+function supportsStandalone(opencodeBin) {
+  try {
+    const result = spawnSync(opencodeBin, ['--help'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    return String(result.stdout || '') .includes('--standalone') ||
+      String(result.stderr || '').includes('--standalone');
+  } catch (_) {
+    return false;
+  }
+}
+
+function buildOpenCodeArgs(args, standaloneSupported) {
+  if (!standaloneSupported || args.includes('--standalone')) return args;
+  if (args.some((arg) => arg === '--server' || arg.startsWith('--server='))) return args;
+
+  const first = args[0] || '';
+  const passthroughCommands = new Set([
+    'auth', 'debug', 'service', 'serve', 'web', 'uninstall', 'upgrade', 'version',
+  ]);
+
+  if (first === 'run') return ['run', '--standalone', ...args.slice(1)];
+  if (passthroughCommands.has(first)) return args;
+  return ['--standalone', ...args];
+}
+
 function health(port, timeoutMs = 500) {
   return new Promise((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: timeoutMs }, (res) => {
@@ -91,8 +128,10 @@ async function main() {
     await waitForProxy();
   }
 
+  const noProxy = mergeNoProxy(process.env);
   const env = {
     ...process.env,
+    ...noProxy,
     HTTP_PROXY: proxyUrl,
     HTTPS_PROXY: proxyUrl,
     http_proxy: proxyUrl,
@@ -100,7 +139,13 @@ async function main() {
     NODE_EXTRA_CA_CERTS: CA_CERT_PATH,
   };
 
-  const child = spawn(opencodeBin, process.argv.slice(2), {
+  const originalArgs = process.argv.slice(2);
+  const opencodeArgs = buildOpenCodeArgs(originalArgs, supportsStandalone(opencodeBin));
+  if (originalArgs.some((arg) => arg === '--server' || arg.startsWith('--server='))) {
+    console.warn('opencode-cc: --server uses a separate OpenCode server; provider traffic may not pass through this local compressor.');
+  }
+
+  const child = spawn(opencodeBin, opencodeArgs, {
     stdio: 'inherit',
     env,
     shell: false,
@@ -135,7 +180,9 @@ async function main() {
   });
 }
 
-main().catch((error) => {
+module.exports = { mergeNoProxy, buildOpenCodeArgs, supportsStandalone };
+
+if (require.main === module) main().catch((error) => {
   console.error('opencode-cc:', error.message);
   process.exitCode = 1;
 });
