@@ -6,7 +6,6 @@ const memoStore = require('./memo-store');
 const profileStore = require('./profile-store');
 const diagnostics = require('./context/diagnostics');
 const runtimeMetrics = require('./context/runtime-metrics');
-const runtimeMetrics = require('./context/runtime-metrics');
 const compressor = require('./compressor');
 const selectionExplain = require('./context/selection-explain');
 
