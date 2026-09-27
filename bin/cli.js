@@ -5,7 +5,7 @@
  * opencode-context-compressor CLI Installer
  *
  * Commands:
- *   node bin/cli.js install   — Full install: CA cert, system trust, wrapper script, systemd service
+ *   node bin/cli.js install   — Full install: local CA, wrapper script, MCP registration, systemd service
  *   node bin/cli.js uninstall — Remove wrapper script and systemd service
  *   node bin/cli.js status    — Show proxy status and memory stats
  */
@@ -53,7 +53,7 @@ exec "${opencodeBin}" "$@"
 `;
 
   // Try to write to /usr/local/bin (needs sudo), fallback to ~/.local/bin
-  const targets = ['/usr/local/bin/opencode-cc', path.join(HOME, '.local', 'bin', 'opencode-cc')];
+  const targets = [path.join(HOME, '.local', 'bin', 'opencode-cc'), '/usr/local/bin/opencode-cc'];
   for (const target of targets) {
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -73,65 +73,17 @@ exec "${opencodeBin}" "$@"
 
 function installCATrust() {
   if (!fs.existsSync(CA_CERT_PATH)) {
-    console.log('🔐 Root CA not yet generated — starting proxy to generate it...');
-    // Spawn proxy briefly just to generate the cert
-    const result = spawnSync(NODE_BIN, ['-e', `require('${path.join(PROJECT_DIR, 'src', 'ca.js')}').getCA(); setTimeout(()=>process.exit(0),500);`], { timeout: 10000 });
-    if (!fs.existsSync(CA_CERT_PATH)) {
-      console.log('⚠️  CA cert generation failed. Proxy will generate it on first start.');
-      return;
-    }
+    console.log('🔐 Root CA not yet generated — generating it locally...');
+    spawnSync(NODE_BIN, ['-e', `require('${path.join(PROJECT_DIR, 'src', 'ca.js')}').getCA()`], { timeout: 15000 });
   }
 
-  console.log(`🔐 Root CA certificate: ${CA_CERT_PATH}`);
-
-  // Try to install system-wide (Linux: update-ca-certificates / Arch: trust)
-  const methods = [
-    // Ubuntu/Debian
-    () => {
-      const dest = '/usr/local/share/ca-certificates/context-compressor-ca.crt';
-      execSync(`sudo cp "${CA_CERT_PATH}" "${dest}" && sudo update-ca-certificates`, { stdio: 'pipe' });
-      console.log('✅ CA installed into system trust store (update-ca-certificates)');
-    },
-    // Fedora/RHEL
-    () => {
-      const dest = '/etc/pki/ca-trust/source/anchors/context-compressor-ca.crt';
-      execSync(`sudo cp "${CA_CERT_PATH}" "${dest}" && sudo update-ca-trust`, { stdio: 'pipe' });
-      console.log('✅ CA installed into system trust store (update-ca-trust)');
-    },
-    // Arch Linux
-    () => {
-      const dest = '/etc/ca-certificates/trust-source/anchors/context-compressor-ca.crt';
-      execSync(`sudo cp "${CA_CERT_PATH}" "${dest}" && sudo trust extract-compat`, { stdio: 'pipe' });
-      console.log('✅ CA installed into system trust store (trust extract-compat)');
-    },
-  ];
-
-  let installed = false;
-  for (const method of methods) {
-    try {
-      method();
-      installed = true;
-      break;
-    } catch (_) { /* try next */ }
+  if (!fs.existsSync(CA_CERT_PATH)) {
+    throw new Error('CA certificate generation failed');
   }
 
-  // Chrome/Chromium NSS (no sudo needed)
-  try {
-    const nssDirs = [
-      path.join(HOME, '.pki', 'nssdb'),
-      path.join(HOME, 'snap', 'chromium', 'current', '.pki', 'nssdb'),
-    ].filter(fs.existsSync);
-    for (const nssDir of nssDirs) {
-      execSync(`certutil -A -n "context-compressor-ca" -t "CT,," -i "${CA_CERT_PATH}" -d "sql:${nssDir}"`, { stdio: 'pipe' });
-      console.log(`✅ CA installed into Chrome NSS database: ${nssDir}`);
-    }
-  } catch (_) { /* certutil not available */ }
-
-  if (!installed) {
-    console.log(`⚠️  Could not auto-install CA into system trust. Add manually:`);
-    console.log(`   sudo cp "${CA_CERT_PATH}" /usr/local/share/ca-certificates/context-compressor-ca.crt`);
-    console.log(`   sudo update-ca-certificates`);
-  }
+  console.log(`🔐 Local Root CA: ${CA_CERT_PATH}`);
+  console.log('✅ System trust store was NOT modified.');
+  console.log('   The opencode-cc wrapper trusts this CA only for its own Node.js process via NODE_EXTRA_CA_CERTS.');
 }
 
 // ─── Systemd service ──────────────────────────────────────────────────────────
@@ -237,7 +189,20 @@ function uninstall() {
   ['/usr/local/bin/opencode-cc', path.join(HOME, '.local', 'bin', 'opencode-cc')].forEach((p) => {
     try { fs.unlinkSync(p); } catch (_) {}
   });
-  console.log('✅ opencode-context-compressor uninstalled.');
+
+  if (fs.existsSync(OPENCODE_CONFIG)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(OPENCODE_CONFIG, 'utf8'));
+      if (config.mcp && typeof config.mcp === 'object') {
+        delete config.mcp['model-memo'];
+        if (Object.keys(config.mcp).length === 0) delete config.mcp;
+      }
+      fs.writeFileSync(OPENCODE_CONFIG, JSON.stringify(config, null, 2));
+    } catch (_) {}
+  }
+
+  try { execSync('systemctl --user daemon-reload', { stdio: 'ignore' }); } catch (_) {}
+  console.log('✅ opencode-context-compressor uninstalled. Durable profile data and the local CA were left in place.');
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
