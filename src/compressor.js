@@ -79,23 +79,11 @@ function messageSize(message) {
 }
 
 function estimateTokens(value) {
-  let text;
-  try { text = typeof value === 'string' ? value : JSON.stringify(value); } catch (_) { text = String(value || ''); }
-  if (!text) return 0;
-  let asciiWord = 0, cjk = 0, other = 0;
-  const words = text.match(/[A-Za-z0-9_]+|[^\x00-\x7F]|[^A-Za-z0-9_\s]/g) || [];
-  for (const token of words) {
-    if (/^[A-Za-z0-9_]+$/.test(token)) asciiWord += Math.max(1, Math.ceil(token.length / 4));
-    else if (/^[\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]$/.test(token)) cjk += 1;
-    else other += 1;
-  }
-  return asciiWord + cjk + other;
+  return tokenBudget.estimateTokens(value);
 }
-
 function messagesTokens(messages) {
-  return (messages || []).reduce((total, message) => total + estimateTokens(message) + 4, 0);
+  return tokenBudget.estimateMessagesTokens(messages);
 }
-
 function messagesSize(messages) {
   return (messages || []).reduce((total, message) => total + messageSize(message), 0);
 }
@@ -225,40 +213,11 @@ function hasStructuredContent(message) {
 }
 
 function stableTextFingerprint(text) {
-  return String(text || '')
-    .replace(/\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<time>')
-    .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|seconds)\b/gi, '<duration>')
-    .replace(/\bpid\s*[=:]?\s*\d+\b/gi, 'pid=<n>')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 12000);
+  return toolCompactor.stableFingerprint(text);
 }
-
 function collapseRepeatedToolOutputs(turns) {
-  const lastSeen = new Map();
-  const out = [];
-  for (let ti = (turns || []).length - 1; ti >= 0; ti -= 1) {
-    const turn = turns[ti];
-    let duplicateOnly = true;
-    const next = turn.map((message) => {
-      if (message?.role !== 'tool' || hasStructuredContent(message)) {
-        if (message?.role !== 'assistant' || (!message.tool_calls && !message.function_call)) duplicateOnly = false;
-        return message;
-      }
-      const text = extractText(message.content);
-      const key = `${message.name || ''}|${stableTextFingerprint(text)}`;
-      if (!text || !lastSeen.has(key)) {
-        lastSeen.set(key, true);
-        duplicateOnly = false;
-        return message;
-      }
-      return { ...message, content: replaceTextContent(message.content, '[Repeated tool output omitted; latest equivalent result retained]') };
-    });
-    if (!duplicateOnly || next.some((m) => m?.role === 'user')) out.unshift(next);
-  }
-  return out;
+  return toolCompactor.collapseRepeatedToolOutputs(turns, { isStructured: hasStructuredContent });
 }
-
 function transformMessage(message, age) {
   if (hasStructuredContent(message)) return message;
   const text = extractText(message?.content);
@@ -318,17 +277,8 @@ function anchorKey(fact) {
 }
 
 function factEntities(text) {
-  const source = String(text || '');
-  const entities = new Set();
-  for (const match of source.matchAll(/(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]+)?/g)) entities.add(match[0].toLowerCase());
-  for (const match of source.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\([^)]{0,120}\)/g)) entities.add(match[0].replace(/\s+/g, '').toLowerCase());
-  for (const match of source.matchAll(/\/[A-Za-z0-9_./:{}-]{2,}/g)) entities.add(match[0].toLowerCase());
-  for (const match of source.matchAll(/\b(?:port|ttl|timeout|limit|budget|version)\s*(?:=|:|is|must be)?\s*\d+[A-Za-z]*\b/gi)) entities.add(match[0].toLowerCase());
-  for (const match of source.matchAll(/\b(?:ERR_[A-Z0-9_]+|E[A-Z]{3,}[A-Z0-9_]*|[A-Za-z]+Error)\b/g)) entities.add(match[0].toLowerCase());
-  for (const match of source.matchAll(/\b(?:test|spec)[:#._-][A-Za-z0-9_.:/-]+\b/gi)) entities.add(match[0].toLowerCase());
-  return [...entities];
+  return semanticGraph.factEntities(text);
 }
-
 function factTopicKey(fact) {
   const entities = factEntities(fact);
   if (entities.length) return entities.slice(0, 3).join('|');
@@ -341,57 +291,11 @@ function factTopicKey(fact) {
 }
 
 function buildDependencyGraph(turns) {
-  const graph = new Map();
-  const connect = (a, b) => {
-    if (!a || !b || a === b) return;
-    if (!graph.has(a)) graph.set(a, new Set());
-    graph.get(a).add(b);
-  };
-  for (const turn of turns || []) {
-    const turnEntities = new Set();
-    for (const message of turn) {
-      const text = extractText(message?.content);
-      for (const entity of factEntities(text)) turnEntities.add(entity);
-      const facts = semanticFacts(text);
-      for (const fact of facts ? facts.split(' | ') : []) {
-        const entities = factEntities(fact);
-        for (let i = 0; i < entities.length; i += 1) {
-          for (let j = i + 1; j < entities.length; j += 1) {
-            connect(entities[i], entities[j]); connect(entities[j], entities[i]);
-          }
-        }
-      }
-    }
-    const entities = [...turnEntities].slice(0, 12);
-    for (let i = 0; i < entities.length; i += 1) {
-      for (let j = i + 1; j < entities.length; j += 1) {
-        connect(entities[i], entities[j]); connect(entities[j], entities[i]);
-      }
-    }
-  }
-  return graph;
+  return semanticGraph.buildDependencyGraph(turns);
 }
-
 function dependencyDistances(graph, activeText, maxDepth = 2) {
-  const distance = new Map();
-  const queue = [];
-  for (const seed of factEntities(activeText)) {
-    distance.set(seed, 0);
-    queue.push(seed);
-  }
-  while (queue.length) {
-    const node = queue.shift();
-    const depth = distance.get(node);
-    if (depth >= maxDepth) continue;
-    for (const next of graph.get(node) || []) {
-      if (distance.has(next)) continue;
-      distance.set(next, depth + 1);
-      queue.push(next);
-    }
-  }
-  return distance;
+  return semanticGraph.dependencyDistances(graph, activeText, maxDepth);
 }
-
 function scoreFact(fact, activeText = '') {
   return relevanceEngine.scoreFactDetailed(fact, activeText).score;
 }
