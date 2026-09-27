@@ -22,3 +22,16 @@ test('state change detector distinguishes stable success and failure',()=>{
   assert.equal(c.detectStateChange('FAIL','PASS').kind,'success');
   assert.equal(c.detectStateChange('PASS','Error: broken').kind,'failure');
 });
+
+
+test('fingerprint preserves meaningful git SHAs and checksums',()=>{
+  const a='commit 0123456789abcdef0123456789abcdef01234567';
+  const b='commit fedcba9876543210fedcba9876543210fedcba98';
+  assert.notEqual(c.stableFingerprint(a),c.stableFingerprint(b));
+});
+
+test('fingerprint still normalizes volatile UUID and trace ids',()=>{
+  const a='trace-id=550e8400-e29b-41d4-a716-446655440000 request id=ABCDEF1234567890';
+  const b='trace-id=123e4567-e89b-42d3-a456-426614174000 request id=ZZZZZZ1234567890';
+  assert.equal(c.stableFingerprint(a),c.stableFingerprint(b));
+});
