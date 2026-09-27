@@ -157,7 +157,7 @@ rl.on('line', (line) => {
         const stats = memoStore.stats();
         return ok(
           id,
-          `Active-session memory: ${stats.entries} items. Persistent conversation history: disabled.`
+          `Active-session memory: ${stats.entries} items across ${stats.sessions} temporary session(s). Persistent conversation history: disabled.`
         );
       }
 
