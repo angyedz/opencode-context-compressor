@@ -212,7 +212,12 @@ function splitTurns(messages) {
   return turns;
 }
 
+function hasStructuredContent(message) {
+  return Array.isArray(message?.content) && message.content.some((part) => part && typeof part === 'object' && part.type && part.type !== 'text');
+}
+
 function transformMessage(message, age) {
+  if (hasStructuredContent(message)) return message;
   const text = extractText(message?.content);
   if (!text) return message;
 
@@ -283,6 +288,7 @@ function trimMessageTo(message, maxSize) {
   if (!message || maxSize <= 0) return message;
   if (messageSize(message) <= maxSize) return message;
 
+  if (hasStructuredContent(message) || message.tool_calls || message.function_call) return message;
   const text = extractText(message.content);
   if (!text) return message;
 
@@ -447,6 +453,7 @@ module.exports = {
   extractText,
   replaceTextContent,
   messagesSize,
+  hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
 };
