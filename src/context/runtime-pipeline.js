@@ -8,6 +8,8 @@ const tokenCalibration=require('./token-calibration');
 const invariants=require('./invariants');
 const transcriptRepair=require('./tool-transcript-repair');
 const awareness=require('./compaction-awareness');
+const fileReadCompactor=require('./file-read-compactor');
+const fileWorkingSet=require('./file-working-set');
 
 function requestOutputReserve(body){
   const candidates=[
@@ -47,11 +49,13 @@ function resolveOptions(sessionKey,options={}){
 function compressAndRecord(messages,sessionKey,options={}){
   const resolved=resolveOptions(sessionKey,options);
   const repaired=transcriptRepair.repair(messages);
-  const compressed=compressor.compressMessages(repaired.messages,resolved);
-  const invariantReport=invariants.evaluate(repaired.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
-  if(options.strictInvariants===true&&!invariantReport.valid) invariants.assert(repaired.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
+  const fileCompacted=fileReadCompactor.compactRepeatedFileReads(repaired.messages);
+  const workingSet=fileWorkingSet.renderWorkingSet(fileCompacted.messages,{maxFiles:12});
+  const compressed=compressor.compressMessages(fileCompacted.messages,resolved);
+  const invariantReport=invariants.evaluate(fileCompacted.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
+  if(options.strictInvariants===true&&!invariantReport.valid) invariants.assert(fileCompacted.messages,compressed,{maxChars:resolved.maxChars,maxTokens:resolved.maxTokens});
   const report=compressionReport.publicReport(
-    compressionReport.buildCompressionReport(repaired.messages,compressed,{
+    compressionReport.buildCompressionReport(fileCompacted.messages,compressed,{
       maxChars:resolved.maxChars,
       maxTokens:resolved.maxTokens,
       maxInputTokens:resolved.maxInputTokens,
@@ -60,6 +64,7 @@ function compressAndRecord(messages,sessionKey,options={}){
   );
   report.invariants=invariantReport;
   report.transcriptRepair={repaired:repaired.repaired};
+  report.fileReads={replaced:fileCompacted.replaced,workingSetFiles:workingSet?workingSet.split('\n').length-1:0};
   if(report.savings?.tokens>0) awareness.record(sessionKey,report);
   runtimeMetrics.touch(sessionKey,report);
   return {messages:compressed,report,options:resolved,invariants:invariantReport};
