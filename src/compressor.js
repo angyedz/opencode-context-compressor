@@ -213,7 +213,11 @@ function splitTurns(messages) {
 }
 
 function hasStructuredContent(message) {
-  return Array.isArray(message?.content) && message.content.some((part) => part && typeof part === 'object' && part.type && part.type !== 'text');
+  return Array.isArray(message?.content) && message.content.some((part) => {
+    if (!part || typeof part !== 'object') return false;
+    if (part.type && part.type !== 'text') return true;
+    return Boolean(part.functionCall || part.functionResponse || part.inlineData || part.fileData);
+  });
 }
 
 function transformMessage(message, age) {
