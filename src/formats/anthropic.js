@@ -1,67 +1,64 @@
 'use strict';
 
-/**
- * Anthropic Messages API format handler (/v1/messages)
- *
- * Anthropic structure:
- *   { model, system: "...", messages: [{role, content}], max_tokens, stream }
- *
- * Our compressor works in OpenAI style internally.
- * We convert Anthropic ↔ OpenAI for compression, then rebuild.
- */
-
-/**
- * Convert Anthropic body to OpenAI-style messages array for compression.
- */
-function extractMessages(body) {
-  const msgs = [];
-  if (body.system) {
-    msgs.push({ role: 'system', content: body.system });
-  }
-  for (const m of (body.messages || [])) {
-    const text = typeof m.content === 'string'
-      ? m.content
-      : Array.isArray(m.content)
-        ? m.content.filter((p) => p.type === 'text').map((p) => p.text).join('\n')
-        : '';
-    msgs.push({ role: m.role, content: text });
-  }
-  return msgs;
+function contentText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return typeof part === 'string' ? part : '';
+      if (typeof part.text === 'string') return part.text;
+      if (part.type === 'tool_result') {
+        const inner = part.content;
+        if (typeof inner === 'string') return inner;
+        if (Array.isArray(inner)) {
+          return inner.map((item) => item?.text || '').filter(Boolean).join('\n');
+        }
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
-/**
- * Rebuild Anthropic body from compressed OpenAI-style messages.
- */
+function extractMessages(body) {
+  const messages = [];
+  if (body.system !== undefined && body.system !== null) {
+    messages.push({ role: 'system', content: body.system });
+  }
+
+  for (const message of (body.messages || [])) {
+    messages.push({
+      ...message,
+      role: message.role,
+      content: message.content,
+    });
+  }
+  return messages;
+}
+
 function rebuildBody(original, compressedMessages) {
   const result = { ...original };
-  if (!result.max_tokens) {
-    result.max_tokens = 8192;
-  }
-  const system = compressedMessages.find((m) => m.role === 'system');
+  const system = compressedMessages.find((message) => message.role === 'system');
+
   if (system) result.system = system.content;
+  else delete result.system;
+
   result.messages = compressedMessages
-    .filter((m) => m.role !== 'system')
-    .map((m) => ({ role: m.role, content: m.content }));
+    .filter((message) => message.role !== 'system')
+    .map((message) => {
+      const { role, content } = message;
+      return { role, content };
+    });
+
   return result;
 }
 
-/**
- * Get the last user text.
- */
 function getLastUserText(body) {
-  const msgs = (body.messages || []).filter((m) => m.role === 'user');
-  const last = msgs[msgs.length - 1];
-  if (!last) return '';
-  if (typeof last.content === 'string') return last.content;
-  if (Array.isArray(last.content)) {
-    return last.content.filter((p) => p.type === 'text').map((p) => p.text).join('');
-  }
-  return '';
+  const messages = (body.messages || []).filter((message) => message.role === 'user');
+  const last = messages[messages.length - 1];
+  return last ? contentText(last.content) : '';
 }
 
-/**
- * Build a non-streaming Anthropic response.
- */
 function buildResponse(text) {
   return {
     id: `msg-local-${Date.now()}`,
@@ -75,13 +72,10 @@ function buildResponse(text) {
   };
 }
 
-/**
- * Build SSE streaming chunks for Anthropic format.
- */
 function buildStreamChunks(text) {
   const msgId = `msg-local-${Date.now()}`;
   return [
-    `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: 'context-compressor-local', stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`,
+    `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: 'context-compressor-local', stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } })}\n\n`,
     `event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`,
     `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`,
     `event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`,
@@ -90,4 +84,4 @@ function buildStreamChunks(text) {
   ];
 }
 
-module.exports = { extractMessages, rebuildBody, getLastUserText, buildResponse, buildStreamChunks };
+module.exports = { extractMessages, rebuildBody, getLastUserText, buildResponse, buildStreamChunks, contentText };
