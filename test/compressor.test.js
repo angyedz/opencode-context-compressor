@@ -25,6 +25,8 @@ const {
   rescueRelevantTurns,
   estimateTokens,
   validateToolProtocol,
+  buildDependencyGraph,
+  dependencyDistances,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -347,4 +349,29 @@ test('tool protocol validator catches orphan OpenAI and Anthropic results', () =
   ]).valid,true);
   assert.equal(validateToolProtocol([{role:'tool',tool_call_id:'missing',content:'oops'}]).valid,false);
   assert.equal(validateToolProtocol([{role:'user',content:[{type:'tool_result',tool_use_id:'missing',content:'oops'}]}]).valid,false);
+});
+
+
+test('dependency graph reaches transitive implementation context from the active entity', () => {
+  const turns=[
+    [{role:'user',content:'src/api/router.js calls src/auth/middleware.js for /v1/users.'}],
+    [{role:'assistant',content:'src/auth/middleware.js calls validateSession(token) in src/auth/session.js.'}],
+    [{role:'assistant',content:'Error: validateSession(token) fails refresh-token regression test.'}],
+  ];
+  const graph=buildDependencyGraph(turns);
+  const distances=dependencyDistances(graph,'Fix src/api/router.js',2);
+  assert.equal(distances.get('src/api/router.js'),0);
+  assert.ok(distances.get('src/auth/middleware.js') <= 1);
+  assert.ok(distances.get('src/auth/session.js') <= 2);
+});
+
+test('dependency-aware ranking promotes transitive facts over unrelated failures', () => {
+  const turns=[
+    [{role:'assistant',content:'src/api/router.js uses src/auth/middleware.js.'}],
+    [{role:'assistant',content:'src/auth/middleware.js calls src/auth/session.js validateSession(token).'}],
+    [{role:'assistant',content:'Error: src/auth/session.js validateSession(token) rejects refresh tokens.'}],
+    [{role:'assistant',content:'Error: src/ui/theme.js snapshot failed.'}],
+  ];
+  const ranked=collectRankedAnchors(turns,'Fix src/api/router.js auth flow',3).join('\n');
+  assert.match(ranked,/src\/auth/);
 });
