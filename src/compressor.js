@@ -13,17 +13,11 @@ function isControlCommand(text) {
 function extractText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((part) => {
-      if (typeof part === 'string') return part;
-      if (!part || typeof part !== 'object') return '';
-      if (typeof part.text === 'string') return part.text;
-      if (typeof part.content === 'string') return part.content;
-      return '';
-    }).filter(Boolean).join('\n');
+    return content.map((part) => extractText(part)).filter(Boolean).join('\n');
   }
   if (content && typeof content === 'object') {
     if (typeof content.text === 'string') return content.text;
-    if (typeof content.content === 'string') return content.content;
+    if (content.content !== undefined) return extractText(content.content);
   }
   return '';
 }
@@ -193,12 +187,20 @@ function stripCommands(messages) {
   return result;
 }
 
+function isToolResponseUser(message) {
+  if (message?.role !== 'user' || !Array.isArray(message.content)) return false;
+  return message.content.some((part) => {
+    return part?.type === 'tool_result' || Boolean(part?.functionResponse);
+  });
+}
+
 function splitTurns(messages) {
   const turns = [];
   let current = [];
 
   for (const message of messages || []) {
-    if (message?.role === 'user' && current.length) {
+    const startsNewTurn = message?.role === 'user' && !isToolResponseUser(message);
+    if (startsNewTurn && current.length) {
       turns.push(current);
       current = [message];
     } else {
@@ -297,7 +299,10 @@ function boundRecentHistory(turns, maxChars) {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
     const size = messagesSize(turn);
-    if (selected.length === 0 || used + size <= Math.floor(maxChars * 0.7)) {
+    if (selected.length === 0 && size > Math.floor(maxChars * 0.82)) {
+      break;
+    }
+    if (used + size <= Math.floor(maxChars * 0.7)) {
       selected.unshift(turn);
       used += size;
     } else {
@@ -438,6 +443,7 @@ module.exports = {
   trimSemanticNoise,
   stripCommands,
   splitTurns,
+  isToolResponseUser,
   extractText,
   replaceTextContent,
   messagesSize,
