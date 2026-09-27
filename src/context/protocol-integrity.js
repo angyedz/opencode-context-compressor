@@ -8,28 +8,42 @@
 function collectOpenAI(messages) {
   const calls = new Map();
   const results = new Map();
+  const duplicateCallIds = [];
+  const duplicateResultIds = [];
   for (let index = 0; index < (messages || []).length; index += 1) {
     const message = messages[index];
     for (const call of message?.tool_calls || []) {
-      if (call?.id) calls.set(call.id, index);
+      if (call?.id) {
+        if (calls.has(call.id)) duplicateCallIds.push({ id: call.id, firstIndex: calls.get(call.id), index });
+        else calls.set(call.id, index);
+      }
     }
     if (message?.role === 'tool' && message?.tool_call_id) {
-      results.set(message.tool_call_id, index);
+      if (results.has(message.tool_call_id)) duplicateResultIds.push({ id: message.tool_call_id, firstIndex: results.get(message.tool_call_id), index });
+      else results.set(message.tool_call_id, index);
     }
   }
-  return { calls, results };
+  return { calls, results, duplicateCallIds, duplicateResultIds };
 }
 
 function collectAnthropic(messages) {
   const calls = new Map();
   const results = new Map();
+  const duplicateCallIds = [];
+  const duplicateResultIds = [];
   for (let index = 0; index < (messages || []).length; index += 1) {
     for (const part of messages[index]?.content || []) {
-      if (part?.type === 'tool_use' && part.id) calls.set(part.id, index);
-      if (part?.type === 'tool_result' && part.tool_use_id) results.set(part.tool_use_id, index);
+      if (part?.type === 'tool_use' && part.id) {
+        if (calls.has(part.id)) duplicateCallIds.push({ id: part.id, firstIndex: calls.get(part.id), index });
+        else calls.set(part.id, index);
+      }
+      if (part?.type === 'tool_result' && part.tool_use_id) {
+        if (results.has(part.tool_use_id)) duplicateResultIds.push({ id: part.tool_use_id, firstIndex: results.get(part.tool_use_id), index });
+        else results.set(part.tool_use_id, index);
+      }
     }
   }
-  return { calls, results };
+  return { calls, results, duplicateCallIds, duplicateResultIds };
 }
 
 function collectGemini(messages) {
@@ -44,26 +58,40 @@ function collectGemini(messages) {
   return { calls, results };
 }
 
-function validatePairs(calls, results) {
+function validatePairs(calls, results, duplicateCallIds = [], duplicateResultIds = []) {
   const orphanResults = [];
   const missingResults = [];
-  for (const [id, index] of results) if (!calls.has(id)) orphanResults.push({ id, index });
+  const orderViolations = [];
+  for (const [id, index] of results) {
+    if (!calls.has(id)) orphanResults.push({ id, index });
+    else if (calls.get(id) >= index) orderViolations.push({ id, callIndex: calls.get(id), resultIndex: index });
+  }
   for (const [id, index] of calls) if (!results.has(id)) missingResults.push({ id, index });
-  return { orphanResults, missingResults };
+  return { orphanResults, missingResults, orderViolations, duplicateCallIds, duplicateResultIds };
 }
 
 function validateToolProtocol(messages, { requireResults = false } = {}) {
-  const openai = validatePairs(...Object.values(collectOpenAI(messages)));
-  const anthropic = validatePairs(...Object.values(collectAnthropic(messages)));
+  const openaiCollected = collectOpenAI(messages);
+  const anthropicCollected = collectAnthropic(messages);
+  const openai = validatePairs(openaiCollected.calls, openaiCollected.results, openaiCollected.duplicateCallIds, openaiCollected.duplicateResultIds);
+  const anthropic = validatePairs(anthropicCollected.calls, anthropicCollected.results, anthropicCollected.duplicateCallIds, anthropicCollected.duplicateResultIds);
   const gemini = collectGemini(messages);
 
   const geminiOrphans = [];
-  const seenCalls = new Map();
-  for (const call of gemini.calls) seenCalls.set(call.name, (seenCalls.get(call.name) || 0) + 1);
+  const geminiOrderViolations = [];
+  const callQueues = new Map();
+  for (const call of gemini.calls) {
+    if (!callQueues.has(call.name)) callQueues.set(call.name, []);
+    callQueues.get(call.name).push(call.index);
+  }
   for (const result of gemini.results) {
-    const count = seenCalls.get(result.name) || 0;
-    if (count <= 0) geminiOrphans.push(result);
-    else seenCalls.set(result.name, count - 1);
+    const queue = callQueues.get(result.name) || [];
+    if (!queue.length) {
+      geminiOrphans.push(result);
+      continue;
+    }
+    const callIndex = queue.shift();
+    if (callIndex >= result.index) geminiOrderViolations.push({ name: result.name, callIndex, resultIndex: result.index });
   }
 
   const invalidMissing =
@@ -71,12 +99,19 @@ function validateToolProtocol(messages, { requireResults = false } = {}) {
   return {
     valid:
       openai.orphanResults.length === 0 &&
+      openai.orderViolations.length === 0 &&
+      openai.duplicateCallIds.length === 0 &&
+      openai.duplicateResultIds.length === 0 &&
       anthropic.orphanResults.length === 0 &&
+      anthropic.orderViolations.length === 0 &&
+      anthropic.duplicateCallIds.length === 0 &&
+      anthropic.duplicateResultIds.length === 0 &&
       geminiOrphans.length === 0 &&
+      geminiOrderViolations.length === 0 &&
       !invalidMissing,
     openai,
     anthropic,
-    gemini: { orphanResults: geminiOrphans },
+    gemini: { orphanResults: geminiOrphans, orderViolations: geminiOrderViolations },
   };
 }
 
