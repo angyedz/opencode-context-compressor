@@ -12,6 +12,7 @@ const relevanceEngine = require('./context/relevance-engine');
 const analysisContext = require('./context/analysis-context');
 const provenance = require('./context/provenance');
 const envelopeBudget = require('./context/envelope-budget');
+const contradictionLedger = require('./context/contradiction-ledger');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -464,25 +465,13 @@ function collectRankedAnchorRecords(turns, activeText = '', limit = 24) {
     }
   }
 
-  const ranked = [...best.values()].sort((a, b) => a.recency - b.recency || b.score - a.score);
-  const newestByTopic = new Map();
-  for (const entry of ranked) {
-    const topic = factTopicKey(entry.fact);
-    if (!newestByTopic.has(topic)) newestByTopic.set(topic, entry);
-  }
-
-  const resolvedTopics = new Set();
-  const lifecycleFiltered = [];
-  const byRecency = [...newestByTopic.values()].sort((a, b) => a.recency - b.recency);
-  for (const entry of byRecency) {
-    const state = lifecycleState(entry.fact);
-    const topic = lifecycleTopic(entry.fact);
-    if (state === 'resolved') resolvedTopics.add(topic);
-    if (state === 'open' && resolvedTopics.has(topic)) continue;
-    lifecycleFiltered.push({ ...entry, lifecycle: state, topic });
-  }
-
-  const sorted = lifecycleFiltered.sort((a, b) => b.score - a.score || a.recency - b.recency);
+  const ledgerInput = [...best.values()].map((entry) => ({
+    ...entry,
+    lifecycle: lifecycleState(entry.fact),
+    topic: lifecycleTopic(entry.fact) || factTopicKey(entry.fact),
+  }));
+  const ledger = contradictionLedger.resolveRecords(ledgerInput);
+  const sorted = ledger.active.sort((a, b) => b.score - a.score || a.recency - b.recency);
   const diverse = [];
   const entityCounts = new Map();
   for (const entry of sorted) {
