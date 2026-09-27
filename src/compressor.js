@@ -9,6 +9,7 @@ const stateEngine = require('./context/state-engine');
 const contextPlanner = require('./context/context-planner');
 const semanticIndex = require('./context/semantic-index');
 const retrievalRanker = require('./context/retrieval-ranker');
+const fileWorkingSet = require('./context/file-working-set');
 const relevanceEngine = require('./context/relevance-engine');
 const analysisContext = require('./context/analysis-context');
 const provenance = require('./context/provenance');
@@ -422,11 +423,12 @@ function summarizeTurns(turns, activeText = '') {
 
   const anchors = collectHistoricalAnchors(turns, activeText);
   const state = buildStateSnapshot(turns, activeText);
+  const workingSet = fileWorkingSet.renderWorkingSet((turns || []).flat(), { maxFiles: 12 });
   const anchorBlock = anchors.length
     ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
     : '';
 
-  return `${state ? state + '\n\n' : ''}${anchorBlock}### Turn excerpts\n${lines.join('\n')}`;
+  return `${state ? state + '\n\n' : ''}${workingSet ? workingSet + '\n\n' : ''}${anchorBlock}### Turn excerpts\n${lines.join('\n')}`;
 }
 
 function makeHistorySummary(text) {
