@@ -317,6 +317,19 @@ function scoreFact(fact, activeText = '') {
   return score;
 }
 
+function lifecycleState(fact) {
+  const lower = String(fact || '').toLowerCase();
+  if (/\b(pass(?:ed)?|fixed|resolved|completed|done|green|succeeded|success)\b/.test(lower)) return 'resolved';
+  if (/\b(error|failed|failure|broken|regression|blocked|todo|fixme|remaining)\b/.test(lower)) return 'open';
+  return 'neutral';
+}
+
+function lifecycleTopic(fact) {
+  return factTopicKey(String(fact || '')
+    .replace(/\b(?:error|failed|failure|broken|regression|blocked|todo|fixme|remaining|passed|fixed|resolved|completed|done|green|succeeded|success)\b/gi, '')
+    .replace(/\s+/g, ' '));
+}
+
 function collectRankedAnchors(turns, activeText = '', limit = 24) {
   const best = new Map();
   let recency = 0;
@@ -340,7 +353,17 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
     const topic = factTopicKey(entry.fact);
     if (!newestByTopic.has(topic)) newestByTopic.set(topic, entry);
   }
-  return [...newestByTopic.values()]
+  const resolvedTopics = new Set();
+  const lifecycleFiltered = [];
+  const byRecency = [...newestByTopic.values()].sort((a, b) => a.recency - b.recency);
+  for (const entry of byRecency) {
+    const state = lifecycleState(entry.fact);
+    const topic = lifecycleTopic(entry.fact);
+    if (state === 'resolved') resolvedTopics.add(topic);
+    if (state === 'open' && resolvedTopics.has(topic)) continue;
+    lifecycleFiltered.push(entry);
+  }
+  return lifecycleFiltered
     .sort((a, b) => b.score - a.score || a.recency - b.recency)
     .slice(0, limit)
     .map((entry) => entry.fact);
@@ -630,6 +653,8 @@ module.exports = {
   factEntities,
   factTopicKey,
   recentBudgetRatio,
+  lifecycleState,
+  lifecycleTopic,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
