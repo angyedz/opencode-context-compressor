@@ -17,6 +17,9 @@ const commands = require('./commands');
 function opencodeInjection(messages, options = {}) {
   const sessionKey = options.sessionKey || options.sessionId || memoStore.deriveSessionKey(messages, { provider: 'opencode', model: options.model || '' });
 
+  // Refresh temporary recall from the exact request before command handling or compaction.
+  memoStore.syncMessages(sessionKey, messages);
+
   // 1. Intercept in-chat commands ($context-compressor off, $memo, $help)
   if (commands.isCommandMessage(messages)) {
     const replyText = commands.executeCommand(messages, sessionKey);
@@ -29,10 +32,7 @@ function opencodeInjection(messages, options = {}) {
     };
   }
 
-  // 2. Sync history to temporary active-session recall store
-  memoStore.syncMessages(sessionKey, messages);
-
-  // 3. Compress context if compaction is enabled
+  // 2. Compress context if compaction is enabled
   const disabled = commands.isCompressorDisabled(sessionKey) || options.compressorDisabled === true;
   const compressed = compressor.compressMessages(messages, { ...options, disabled, maxChars: options.maxChars || commands.getSessionLimit(sessionKey) });
 
