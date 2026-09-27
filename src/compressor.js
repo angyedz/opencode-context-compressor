@@ -220,6 +220,41 @@ function hasStructuredContent(message) {
   });
 }
 
+function stableTextFingerprint(text) {
+  return String(text || '')
+    .replace(/\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<time>')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|seconds)\b/gi, '<duration>')
+    .replace(/\bpid\s*[=:]?\s*\d+\b/gi, 'pid=<n>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 12000);
+}
+
+function collapseRepeatedToolOutputs(turns) {
+  const lastSeen = new Map();
+  const out = [];
+  for (let ti = (turns || []).length - 1; ti >= 0; ti -= 1) {
+    const turn = turns[ti];
+    let duplicateOnly = true;
+    const next = turn.map((message) => {
+      if (message?.role !== 'tool' || hasStructuredContent(message)) {
+        if (message?.role !== 'assistant' || (!message.tool_calls && !message.function_call)) duplicateOnly = false;
+        return message;
+      }
+      const text = extractText(message.content);
+      const key = `${message.name || ''}|${stableTextFingerprint(text)}`;
+      if (!text || !lastSeen.has(key)) {
+        lastSeen.set(key, true);
+        duplicateOnly = false;
+        return message;
+      }
+      return { ...message, content: replaceTextContent(message.content, '[Repeated tool output omitted; latest equivalent result retained]') };
+    });
+    if (!duplicateOnly || next.some((m) => m?.role === 'user')) out.unshift(next);
+  }
+  return out;
+}
+
 function transformMessage(message, age) {
   if (hasStructuredContent(message)) return message;
   const text = extractText(message?.content);
@@ -615,12 +650,13 @@ function compressMessages(rawMessages, options = {}) {
   const activeTurn = turns[turns.length - 1];
   const historicalTurns = turns.slice(0, -1);
 
-  const agedTurns = historicalTurns.map((turn, index) => {
+  const agedTurnsRaw = historicalTurns.map((turn, index) => {
     const distance = historicalTurns.length - 1 - index;
     const age = distance <= 1 ? 'warm' : 'cold';
     return turn.map((message) => transformMessage(message, age));
   });
 
+  const agedTurns = collapseRepeatedToolOutputs(agedTurnsRaw);
   const agedHistory = agedTurns.flat();
   const trigger = Math.min(COMPACT_TRIGGER_CHARS, maxChars);
 
@@ -661,6 +697,8 @@ module.exports = {
   factEntities,
   factTopicKey,
   recentBudgetRatio,
+  stableTextFingerprint,
+  collapseRepeatedToolOutputs,
   lifecycleState,
   lifecycleTopic,
   hasStructuredContent,
