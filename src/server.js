@@ -1,7 +1,7 @@
 'use strict';
 
 const http = require('http');
-const compressor = require('./compressor');
+const runtimePipeline = require('./context/runtime-pipeline');
 const memoStore = require('./memo-store');
 const commands = require('./commands');
 
@@ -65,10 +65,7 @@ const server = http.createServer((req, res) => {
         }));
       }
 
-      const compressed = compressor.compressMessages(messages, {
-        disabled: commands.isCompressorDisabled(sessionKey),
-        maxChars: commands.getSessionLimit(sessionKey),
-      });
+      const compressed = runtimePipeline.compressAndRecord(messages, sessionKey, { requestBody: parsed }).messages;
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ...parsed, messages: compressed }));
