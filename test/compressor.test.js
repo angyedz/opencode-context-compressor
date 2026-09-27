@@ -141,3 +141,23 @@ test('structured multimodal and Anthropic-style blocks are byte-for-byte preserv
   assert.deepEqual(retainedStructured, structured);
   assert.deepEqual(retainedTool, toolUse);
 });
+
+
+test('cold summaries retain implementation anchors needed by later coding turns', () => {
+  const messages = [];
+  messages.push({ role: 'user', content: 'Implement src/auth/session.js. Decision: session TTL must be 900 seconds. TODO preserve refresh behavior.' });
+  messages.push({ role: 'assistant', content: 'Added function validateSession(token) and endpoint /v1/session. Tests failed with Error: expired token accepted.' });
+  for (let i = 0; i < 18; i += 1) {
+    messages.push({ role: 'user', content: 'intermediate task ' + i + ' ' + 'x'.repeat(700) });
+    messages.push({ role: 'assistant', content: 'intermediate result ' + i + ' ' + 'y'.repeat(700) });
+  }
+  messages.push({ role: 'user', content: 'Now fix the original auth issue without changing its contract.' });
+
+  const out = compressMessages(messages, { maxChars: 7000 });
+  const serialized = JSON.stringify(out);
+  assert.match(serialized, /src\\/auth\\/session\.js/);
+  assert.match(serialized, /validateSession/);
+  assert.match(serialized, /expired token accepted/);
+  assert.match(serialized, /900 seconds/);
+  assert.equal(out[out.length - 1].content, 'Now fix the original auth issue without changing its contract.');
+});
