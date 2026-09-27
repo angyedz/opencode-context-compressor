@@ -41,3 +41,12 @@ function run(budget) {
 const budgets = process.argv.slice(2).map(Number).filter(Number.isFinite);
 const results = (budgets.length ? budgets : [8000, 16000, 32000, 55000]).map(run);
 console.log(JSON.stringify({ workload: 'synthetic-tool-heavy-120-turns', results }, null, 2));
+
+if (results.some((r) => !r.currentTurnExact)) {
+  console.error('benchmark invariant failed: current turn changed');
+  process.exitCode = 1;
+}
+if (results.some((r) => r.reductionPercent < 50)) {
+  console.error('benchmark invariant failed: tool-heavy workload compressed by less than 50%');
+  process.exitCode = 1;
+}
