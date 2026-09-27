@@ -125,7 +125,7 @@ function executeCommand(messages, sessionKey = 'default') {
       '',
       `- Compaction: ${disabledSessions.has(sessionKey) ? '🔴 disabled' : '🟢 enabled'}`,
       `- Historical budget: **${getSessionLimit(sessionKey).toLocaleString()} chars**`,
-      `- Active-session memory: **${stats.entries} items** (temporary, non-persistent)`,
+      `- Active-session memory: **${stats.entries} items across ${stats.sessions} session(s)** (temporary, non-persistent)`,
       `- Durable profile memory: **${profile.facts} facts**`,
     ].join('\n');
   }
