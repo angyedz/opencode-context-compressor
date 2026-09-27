@@ -3,6 +3,7 @@
 const tokenBudget=require('./token-budget');
 const quality=require('./quality-gates');
 const graph=require('./semantic-graph');
+const envelopeBudget=require('./envelope-budget');
 
 function splitTurns(messages){
   const turns=[];let current=[];
@@ -17,7 +18,7 @@ function splitTurns(messages){
 
 function serializedChars(value){try{return JSON.stringify(value).length;}catch(_){return 0;}}
 
-function buildCompressionReport(input,output,{maxChars=null,maxTokens=null,anchors=[]}={}){
+function buildCompressionReport(input,output,{maxChars=null,maxTokens=null,maxInputTokens=null,reserveOutputTokens=4096,anchors=[]}={}){
   const beforeChars=serializedChars(input);
   const afterChars=serializedChars(output);
   const beforeTokens=tokenBudget.estimateMessagesTokens(input);
@@ -25,6 +26,15 @@ function buildCompressionReport(input,output,{maxChars=null,maxTokens=null,ancho
   const q=quality.evaluateCompression({input,output,anchors,maxChars,maxTokens});
   const turns=splitTurns(output);
   const g=graph.graphStats(graph.buildDependencyGraph(turns));
+  const inputTurns=splitTurns(input);
+  const activeTurn=inputTurns.length?inputTurns[inputTurns.length-1]:[];
+  const envelope=envelopeBudget.planInputEnvelope({
+    maxInputTokens,
+    reserveOutputTokens,
+    systemMessages:(input||[]).filter(m=>m?.role==='system'),
+    activeTurn,
+    requestedHistoryTokens:maxTokens,
+  });
   return {
     before:{chars:beforeChars,tokens:beforeTokens,messages:(input||[]).length},
     after:{chars:afterChars,tokens:afterTokens,messages:(output||[]).length},
@@ -37,7 +47,8 @@ function buildCompressionReport(input,output,{maxChars=null,maxTokens=null,ancho
     },
     quality:{score:q.score,...q.checks},
     graph:g,
-    limits:{maxChars,maxTokens},
+    limits:{maxChars,maxTokens,maxInputTokens,reserveOutputTokens},
+    envelope,
     generatedAt:Date.now(),
   };
 }
@@ -51,6 +62,7 @@ function publicReport(report){
     quality:report.quality,
     graph:report.graph,
     limits:report.limits,
+    envelope:report.envelope,
     generatedAt:report.generatedAt,
   };
 }
