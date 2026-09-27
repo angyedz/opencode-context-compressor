@@ -10,22 +10,10 @@
 const compressor = require('./compressor');
 const memoStore = require('./memo-store');
 const commands = require('./commands');
-const compressionReport = require('./context/compression-report');
-const runtimeMetrics = require('./context/runtime-metrics');
+const runtimePipeline = require('./context/runtime-pipeline');
 
 function compressAndRecord(messages, sessionKey, options = {}) {
-  const disabled = commands.isCompressorDisabled(sessionKey) || options.compressorDisabled === true;
-  const maxChars = options.maxChars || commands.getSessionLimit(sessionKey);
-  const maxTokens = options.maxTokens ?? commands.getSessionTokenLimit(sessionKey);
-  const maxInputTokens = options.maxInputTokens ?? commands.getSessionInputLimit(sessionKey);
-  const reserveOutputTokens = options.reserveOutputTokens ?? commands.getSessionOutputReserve(sessionKey);
-  const compressorOptions = { ...options, disabled, maxChars, maxTokens, maxInputTokens, reserveOutputTokens };
-  const compressed = compressor.compressMessages(messages, compressorOptions);
-  const report = compressionReport.publicReport(
-    compressionReport.buildCompressionReport(messages, compressed, { maxChars, maxTokens, maxInputTokens, reserveOutputTokens })
-  );
-  runtimeMetrics.touch(sessionKey, report);
-  return compressed;
+  return runtimePipeline.compressAndRecord(messages, sessionKey, options).messages;
 }
 
 /**
