@@ -15,6 +15,7 @@ const envelopeBudget = require('./context/envelope-budget');
 const contradictionLedger = require('./context/contradiction-ledger');
 const taskStateGraph = require('./context/task-state-graph');
 const summaryPacker = require('./context/summary-packer');
+const diffCompactor = require('./context/diff-compactor');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -101,34 +102,9 @@ function messagesSize(messages) {
 function compressTerminalOutput(text, targetChars = 2200) {
   if (typeof text !== 'string' || text.length < 500) return text;
 
-  if (text.includes('diff --git') || text.includes('--- a/') || text.includes('+++ b/')) {
-    const lines = text.split('\n');
-    const kept = [];
-    let unchanged = 0;
-
-    for (const line of lines) {
-      const important = (
-        line.startsWith('diff --git') ||
-        line.startsWith('--- ') ||
-        line.startsWith('+++ ') ||
-        line.startsWith('@@') ||
-        line.startsWith('+') ||
-        line.startsWith('-')
-      );
-      if (important) {
-        kept.push(line);
-        unchanged = 0;
-      } else if (unchanged < 2) {
-        kept.push(line);
-        unchanged += 1;
-      } else if (unchanged === 2) {
-        kept.push('  ... [unchanged lines omitted] ...');
-        unchanged += 1;
-      }
-    }
-
-    const diff = kept.join('\n');
-    if (diff.length < text.length) text = diff;
+  if (diffCompactor.isDiff(text)) {
+    const compacted = diffCompactor.compactDiff(text, { targetChars: Math.max(900, Number(targetChars) || 2200) });
+    if (compacted.length < text.length) text = compacted;
   }
 
   if (
