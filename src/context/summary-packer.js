@@ -11,6 +11,21 @@ function truncateLine(line,maxChars){
   return value.slice(0,maxChars-1)+'…';
 }
 
+function expandStateLines(stateText){
+  const expanded=[];
+  for(const raw of String(stateText||'').split('\n')){
+    const line=cleanLine(raw);
+    if(!line||line==='### Working state') continue;
+    const match=line.match(/^-\s*([a-z_]+):\s*(.*)$/i);
+    if(!match){expanded.push(line);continue;}
+    const label=match[1];
+    const facts=match[2].split(/\s+;\s+/).map(cleanLine).filter(Boolean);
+    if(!facts.length){expanded.push(line);continue;}
+    for(const fact of facts) expanded.push(`- ${label}: ${fact}`);
+  }
+  return expanded;
+}
+
 function statePriority(line){
   const lower=String(line||'').toLowerCase();
   if(lower.includes('blockers:')) return 100;
@@ -38,10 +53,7 @@ function packSummary({stateText='',anchors=[],excerpts=[]}={},budget=2400){
   if(max<80) return '';
   const out={budget:max,used:0,lines:[]};
 
-  const stateLines=String(stateText||'')
-    .split('\n')
-    .map(cleanLine)
-    .filter(line=>line&&line!=='### Working state')
+  const stateLines=expandStateLines(stateText)
     .sort((a,b)=>statePriority(b)-statePriority(a));
 
   if(stateLines.length){
@@ -79,4 +91,4 @@ function unpackStats(text){
   };
 }
 
-module.exports={cleanLine,truncateLine,statePriority,packSummary,unpackStats};
+module.exports={cleanLine,truncateLine,expandStateLines,statePriority,packSummary,unpackStats};
