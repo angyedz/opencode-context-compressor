@@ -1,78 +1,81 @@
-# ⚡ opencode-context-compressor
+# opencode-context-compressor
 
-<div align="center">
+Local bounded-context proxy for OpenCode with **session-only exact recall** and a **small durable profile memory**.
 
-### **Transparent MITM Proxy for OpenCode — Measured Real-World Context Compression & Token Savings**
+> v2 focuses on correctness: old history is compacted aggressively, current work stays intact, structured tool calls are preserved, and full chat history is not kept across sessions.
 
-[English](#english) | [Русский](#русский)
+## What it does
 
----
+```text
+OpenCode
+   │  HTTP(S)_PROXY
+   ▼
+127.0.0.1:3266
+   │
+   ├─ local $commands → answered without an LLM request
+   ├─ active conversation → temporary exact recall store
+   ├─ old history → bounded turn-aware compaction
+   └─ provider request → OpenAI / Anthropic / Gemini
+```
 
-</div>
+- Keeps historical conversation context inside a configurable character budget.
+- Preserves the current user turn and provider system prompt instead of silently truncating the task being worked on.
+- Compacts whole semantic turns so tool-call / tool-result chains are not split arbitrarily.
+- Preserves structured OpenAI `tool_calls`, Anthropic `tool_use` / `tool_result`, and Gemini `functionCall` / `functionResponse` blocks.
+- Stores exact current-session details temporarily so the model can recover compacted information with `memo_recall`.
+- Does **not** retain full conversation history as long-term memory.
+- Persists only short durable profile facts explicitly saved through `profile_remember` or `$remember`.
 
-<a name="english"></a>
-## 🇬🇧 English
+## Memory model
 
-> ⚠️ **IMPORTANT DISCLAIMER & BEST PRACTICE RECOMMENDATIONS**
-> 
-> **Aggressive history compression (e.g. setting `$compressor limit` below `6k–8k` chars or on multi-file complex refactoring sessions) may cause the model to lose track of exact signatures or subtle logic written 10+ turns ago.**
-> 
-> - 💻 **Recommended for Daily Development:** `$compressor limit 16k` – `$compressor limit 20k` *(Default Golden Standard ~4,000 – 5,000 tokens)*
-> - 🏢 **Recommended for Large Multi-File Refactoring:** `$compressor limit 32k` or `$compressor limit 55k`
-> - ⚡ **Recommended for Simple Q&A / Quick Scripts:** `$compressor limit 6k` – `$compressor limit 8k`
+### 1. Active-session memory
 
----
+The proxy rebuilds a temporary timeline from the request history. Multiple active conversations are isolated by session key. Temporary sessions are bounded, expire after inactivity, and are not durable cross-session profile memory. The temporary store lives under the OS temp directory and expires after inactivity.
 
-### 🚀 Manage Exploding Context Windows in OpenCode
+This is what `memo_recall` searches when old turns were compacted.
 
-During extended coding sessions in OpenCode, context sizes naturally grow as previous tool outputs, git diffs, and generated code accumulate.
+### 2. Durable profile memory
 
-**opencode-context-compressor** is a local MITM proxy running between OpenCode and LLM providers (**Qwen 3.8 Max**, **GPT-5.6 Sol**, **Claude Opus 5**, **DeepSeek V4**). It intelligently prunes redundant terminal output, compresses historical turns, and bounds context according to your configured limit (`16k`, `32k`, `55k` chars).
+Long-term memory is intentionally small and explicit. It is meant for facts such as:
 
----
+- stable user preferences;
+- workflow conventions;
+- development environment facts;
+- durable project decisions.
 
-### 📊 Real-World Benchmark (5 Sequential Coding Tasks on `Qwen 3.8 Max`)
+It is **not** intended for secrets, sensitive personal data, or complete chat transcripts. Facts are stored in `~/.context-compressor/profile.json` with restrictive file permissions.
 
-Below are actual empirical measurements executed via OpenCode on **Qwen 3.8 Max (`qwen3.8-max`)** comparing uncompressed history vs `opencode-context-compressor` (default `16k` limit):
+## Context budget
 
-#### 🧪 Benchmark Scenario Tasks:
-1. **Task 1**: Node.js HTTP REST API server with JWT auth and JSON routing.
-2. **Task 2**: Schema validation middleware + ANSI logger + WebSocket session tracker.
-3. **Task 3**: In-memory LRU Cache with TTL expiration & 100,000 item benchmark.
-4. **Task 4**: Recursive descent Math AST Parser supporting variables & functions.
-5. **Task 5**: CLI Task Manager with ANSI colors, JSON file persistence & filtering.
+`$compressor limit 16k` sets the budget for **historical conversation messages**. The current active turn and the provider's original system prompt are preserved separately.
 
-#### 📈 Benchmark Results & Code Quality Table:
+This distinction is deliberate: a single huge current request cannot be truthfully forced below 16k without corrupting that request. The compressor therefore bounds old history while keeping the task currently being executed intact.
 
-| Task # / Turn | Raw Context (No Proxy) | Compressed Context (With Proxy) | Context Savings % | Generated Code Quality & Output Size |
-|---|---|---|---|---|
-| **Task 1** (Initial turn) | 317 chars (~79 tokens) | 317 chars (~79 tokens) | **0%** (Warmup) | 4,142 chars (100% production code) |
-| **Task 2** (2 turns code) | 4,005 chars (~1,001 tokens) | 4,680 chars (~1,170 tokens) | **0%** (Intact) | 5,097 chars (100% production code) |
-| **Task 3** (3 turns code) | 9,694 chars (~2,424 tokens) | 9,994 chars (~2,499 tokens) | **0%** (Intact) | 4,316 chars (100% production code) |
-| **Task 4** (4 turns code) | 14,286 chars (~3,572 tokens) | 10,723 chars (~2,681 tokens) | **-25.0%** 📉 | 4,942 chars (Clean AST parser, 0 loss) |
-| **Task 5** (5 turns code) | 18,970 chars (~4,743 tokens) | **10,214 chars (~2,554 tokens)** | **-46.2%** 📉 | **4,772 chars (Full CLI Manager, 0 loss)** |
-| **Task 10+** *(Projected)* | 45,000+ chars (~11,250 tok) | **~12,500 chars (~3,100 tokens)** | **~-72.2%** 🎯 | **Strictly Bounded (~4.8k chars code)** |
+The implementation currently uses character-based budgeting. Token counts shown in status output are approximate (`chars / 4`), not tokenizer-exact.
 
-#### 🧠 Code Quality & Attention Impact:
-- **Zero Loss of Code Completeness**: Average response output size remains **4,500 – 5,000 chars of production code** per task in both modes.
-- **Elimination of *"Lost in the Middle"* Effect**: By skeletonizing older turns and stripping noisy terminal logs, the model's attention heads remain 100% focused on current task instructions rather than historical noise.
-- **Optimal Bounding**: Total prompt context is strictly bounded around **~3,000 – 4,000 tokens (16k chars)** regardless of session depth.
+## Compression strategy
 
----
+1. Recent historical turns are kept intact when they fit.
+2. Verbose terminal/tool output is trimmed while retaining the beginning and end.
+3. Older code-heavy assistant output is skeletonized.
+4. Older semantic turns are folded into a compact history message.
+5. Exact details remain recoverable from temporary active-session memory.
 
-### 🔥 Features
+## Security
 
-- **⚡ Zero-Cost In-Chat Commands**: Commands like `$compressor status`, `$compressor limit 16k`, `$compressor off/on`, `$compressor update` are answered directly by the proxy in **0ms with 0 LLM API calls**.
-- **🎛️ Configurable Context Limit**: Set your session threshold dynamically (`$compressor limit 16k`, `$compressor limit 32k`, `$compressor limit 55k`).
-- **🔄 In-Chat Self-Update**: Run `$compressor update` in OpenCode chat to pull the latest code and restart the service via a non-blocking detached worker.
-- **🌊 Unbuffered Real-Time Streaming**: Socket `TCP_NODELAY` + header flushing for smooth word-by-word SSE streaming.
-- **🛡️ Truncation Protection**: Enforces adequate `max_tokens` headers to prevent output cutting off mid-response.
-- **🧠 Persistent Memory (`model-memo` MCP)**: Allows the model to recall pruned tool outputs from earlier in the session when needed.
-- **🎯 Local Provider Detection**: Fingerprints local endpoints like `qwen-free-api` (via `X-Service: qwen-free-api`) to bypass double compression.
+- Proxy listener is bound to `127.0.0.1`, not the LAN.
+- Upstream HTTPS certificates are verified normally.
+- The generated CA private key is stored with mode `0600`.
+- Installation does **not** modify the global OS CA trust store. `opencode-cc` starts the local proxy on demand and scopes its CA to the launched process.
+- `opencode-cc` scopes trust to the launched OpenCode runtime with `NODE_EXTRA_CA_CERTS`.
+- Local OpenCode traffic is bypassed with `NO_PROXY=localhost,127.0.0.1,::1`.
+- Durable profile facts are injected as explicitly untrusted context data; they are not allowed to override higher-priority instructions.
 
----
+Because this is an HTTPS MITM proxy, only use it on machines and accounts you control.
 
-### ⚡ Quick Installation
+## Install
+
+Requirements: Node.js 18+ and OpenCode. Linux, macOS, and Windows use the same on-demand launcher model.
 
 ```bash
 git clone https://github.com/angyedz/opencode-context-compressor.git
@@ -81,103 +84,86 @@ npm install
 node bin/cli.js install
 ```
 
-Launch OpenCode:
+Then launch:
+
 ```bash
 opencode-cc
 ```
 
----
----
+The launcher starts the MITM proxy only for the lifetime of OpenCode. On current OpenCode versions it automatically uses a private `--standalone` server for the TUI and `run`, so provider traffic actually inherits the proxy environment. It also merges `localhost,127.0.0.1,::1` into `NO_PROXY` to keep OpenCode's local client/server traffic out of the MITM loop.
 
-<a name="русский"></a>
-## 🇷🇺 Русский
+If you explicitly pass `--server`, the provider request is made by that separate OpenCode server and cannot be guaranteed to pass through this local compressor; the launcher prints a warning.
 
-> ⚠️ **ВАЖНОЕ ПРЕДУПРЕЖДЕНИЕ И РЕКОМЕНДАЦИИ**
-> 
-> **Слишком агрессивное сжатие истории (например, установка `$compressor limit` ниже `6k–8k` символов или работа со сложным многофайловым рефакторингом) может привести к тому, что модель потеряет точные сигнатуры функций или тонкую логику, написанную 10+ шагов назад.**
-> 
-> - 💻 **Рекомендуется для повседневной разработки:** `$compressor limit 16k` – `$compressor limit 20k` *(Золотой стандарт по умолчанию ~4 000 – 5 000 токенов)*
-> - 🏢 **Рекомендуется для крупного рефакторинга:** `$compressor limit 32k` или `$compressor limit 55k`
-> - ⚡ **Рекомендуется для простых вопросов / скриптов:** `$compressor limit 6k` – `$compressor limit 8k`
-
----
-
-### 🚀 Контроль расхода контекста в OpenCode
-
-В процессе длительной разработки в OpenCode объем контекста неизбежно растет из-за накапливающихся выводов консоли, `git diff` и создаваемого кода.
-
-**opencode-context-compressor** — это локальный MITM прокси-сервер между OpenCode и провайдерами нейросетей (**Qwen 3.8 Max**, **GPT-5.6 Sol**, **Claude Opus 5**, **DeepSeek V4**). Он аккуратно сжимает устаревшие логи, удаляет лишний шум и удерживает контекст в пределах заданного лимита (`16k`, `32k`, `55k` символов).
-
----
-
-### 📊 Реальный бенчмарк (5 последовательных задач кодинга на `Qwen 3.8 Max`)
-
-Ниже приведены реальные измеримые результаты бенчмаркинга в OpenCode на модели **Qwen 3.8 Max (`qwen3.8-max`)** при сравнении стандартного режима без прокси и с `opencode-context-compressor` (лимит по умолчанию `16k`):
-
-#### 🧪 Сценарий бенчмарка из 5 задач:
-1. **Задача 1**: HTTP REST API сервер на чистом Node.js с авторизацией JWT.
-2. **Задача 2**: Валидация JSON Schema + ANSI-логгер + трекер WebSocket-сессий.
-3. **Задача 3**: In-memory LRU Cache с TTL и тестом на 100 000 элементов.
-4. **Задача 4**: Рекурсивный AST-парсер математических выражений.
-5. **Задача 5**: Интерактивный CLI Task Manager с ANSI-цветами и сохранением в JSON.
-
-#### 📈 Таблица результатов и анализа качества кода:
-
-| № Задачи / Ход | Контекст без компрессора | Контекст с компрессором | % Сжатия | Качество кода и размер ответа |
-|---|---|---|---|---|
-| **Задача 1** (Старт) | 317 симв (~79 токенов) | 317 симв (~79 токенов) | **0%** (Разогрев) | 4 142 симв (100% чистый рабочий код) |
-| **Задача 2** (2 хода) | 4 005 симв (~1 001 токенов) | 4 680 симв (~1 170 токенов) | **0%** (Без изменений) | 5 097 симв (100% чистый рабочий код) |
-| **Задача 3** (3 хода) | 9 694 симв (~2 424 токенов) | 9 994 симв (~2 499 токенов) | **0%** (Без изменений) | 4 316 симв (100% чистый рабочий код) |
-| **Задача 4** (4 хода) | 14 286 симв (~3 572 токенов) | 10 723 симв (~2 681 токенов) | **-25.0%** 📉 | 4 942 симв (AST-парсер без потерь) |
-| **Задача 5** (5 ходов) | 18 970 симв (~4 743 токенов) | **10 214 симв (~2 554 токенов)** | **-46.2%** 📉 | **4 772 симв (Полноценный CLI, 0 потерь)** |
-| **Задача 10+** *(Прогноз)* | 45 000+ симв (~11 250 токенов) | **~12 500 симв (~3 100 токенов)** | **~-72.2%** 🎯 | **Жесткий лимит (~4.8k симв кода)** |
-
-#### 🧠 Анализ качества кода и внимания модели (Attention):
-- **Нулевая потеря полноты кода**: Средний размер генерируемого ответа с компрессором составляет **4 500 – 5 000 символов готового кода** на задачу в обоих режимах (без заглушек и `// todo`).
-- **Устранение эффекта *"Lost in the Middle"*: Очистка логов консоли и скелетонизация старых ходов позволяет вниманию нейросети фокусно концентрироваться на текущей задаче, не отвлекаясь на информационный шум прошлых шагов.
-- **Оптимальное окно**: Суммарный контекст **жестко удерживается в районе ~3 000 – 4 000 токенов (16k символов)** независимо от количества пройденных шагов в сессии.
-
----
-
-### 🔥 Возможности
-
-- **⚡ Бесплатные инчат-команды**: Команды `$compressor status`, `$compressor limit 16k`, `$compressor off/on`, `$compressor update` обработаются локально за **0мс и 0 токенов**.
-- **🎛️ Гибкая настройка порога**: Изменение лимита контекста прямо в чате (`$compressor limit 16k`, `$compressor limit 32k`, `$compressor limit 55k`).
-- **🔄 Самообновление из чата**: Команда `$compressor update` затягивает свежий код с GitHub и перезапускает сервис в фоновом независящем процессе.
-- **🌊 Плавный стриминг**: Сокеты в режиме `TCP_NODELAY` отдают токены по 1 слову без задержек.
-- **🛡️ Защита от обрыва ответа**: Гарантия выставления корректных `max_tokens` заголовков.
-- **🧠 Память хронологии (`model-memo` MCP)**: Позволяет модели при необходимости точечно запрашивать вырезанные логи прошлых шагов.
-- **🎯 Детект локальных сервисов**: Автоматически распознает `qwen-free-api` (заголовок `X-Service: qwen-free-api`) и не сжимает их повторно.
-
----
-
-### ⚡ Быстрая установка
+Remove the MCP registration:
 
 ```bash
-git clone https://github.com/angyedz/opencode-context-compressor.git
-cd opencode-context-compressor
-npm install
-node bin/cli.js install
+node bin/cli.js uninstall
 ```
 
-Запуск OpenCode через прокси:
+The durable profile and local CA are intentionally left in place on uninstall so user data is not deleted unexpectedly.
+
+## In-chat commands
+
+| Command | Purpose |
+|---|---|
+| `$compressor status` | Show compaction and memory state |
+| `$compressor limit 16k` | Set historical context budget |
+| `$compressor off` / `on` | Disable/enable compaction for this session |
+| `$history` | Show recent active-session timeline |
+| `$search <query>` | Search exact active-session details |
+| `$memo clear` | Clear temporary active-session memory |
+| `$remember [category] <fact>` | Save one durable profile fact |
+| `$profile` | Show durable profile facts |
+| `$forget <query>` | Delete matching durable profile facts |
+| `$reset` | Reset temporary session state but keep durable profile |
+
+## MCP tools
+
+- `memo_recall` — exact recall from the active conversation only.
+- `memo_save` — temporary active-session note.
+- `memo_stats` — temporary-memory statistics.
+- `profile_remember` — explicitly persist one durable fact.
+- `profile_recall` — read durable profile facts.
+- `profile_forget` — delete durable profile facts.
+
+## Provider support
+
+- OpenAI-compatible `/chat/completions`
+- Anthropic `/v1/messages`
+- Gemini `generateContent` / `streamGenerateContent`
+
+Unknown formats are forwarded without mutation.
+
+## Tests
+
 ```bash
-opencode-cc
+npm test
 ```
 
----
+GitHub Actions runs syntax checks and the test suite on Node.js 18, 20, and 22.
 
-### 💬 Инчат-команды
+Regression tests cover:
 
-- `$compressor check-update` — Проверить наличие обновлений на GitHub
-- `$compressor update` — Выполнить самообновление в фоновом потоке
-- `$compressor limit <N>` — Установить лимит контекста (например `16k`, `32k`, `55000`)
-- `$compressor status` — Проверить статус сжатия
-- `$compressor off` / `on` — Переключить компрессор
-- `$history` — Посмотреть историю сохранённых чекпоинтов
+- bounded historical context;
+- exact preservation of the active turn;
+- OpenAI tool-call pairing;
+- Anthropic structured blocks;
+- Gemini structured parts;
+- concurrent session isolation;
+- durable-profile isolation;
+- local command interception;
+- proxy / CA security invariants.
 
----
+## Русский
+
+`opencode-context-compressor` v2 сжимает **старую историю**, но не режет текущий запрос пользователя и системный промпт. Точные детали вырезанной истории остаются только во временной памяти активной сессии и могут быть возвращены через `memo_recall`.
+
+Полная переписка между сессиями больше не сохраняется. Между сессиями остаётся только маленький профиль из явно сохранённых устойчивых фактов: предпочтения пользователя, правила рабочего процесса, окружение и важные решения проекта.
+
+Лимит `$compressor limit 16k` относится именно к исторической части контекста. Это честнее и безопаснее, чем обещать жёсткий лимит всего запроса и незаметно обрезать текущую задачу.
+
+Прокси слушает только `127.0.0.1`, проверяет TLS-сертификаты настоящего провайдера и по умолчанию не добавляет свой CA в системное хранилище доверия.
 
 ## License
 
-MIT © [angyedz](https://github.com/angyedz)
+MIT

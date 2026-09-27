@@ -9,6 +9,7 @@ const forge = require('node-forge');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const CA_DIR = path.join(os.homedir(), '.context-compressor', 'ca');
 const CA_CERT_PATH = path.join(CA_DIR, 'ca.crt');
@@ -22,8 +23,8 @@ function generateCA() {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
   cert.publicKey = keys.publicKey;
-  cert.serialNumber = '01';
-  cert.validity.notBefore = new Date();
+  cert.serialNumber = crypto.randomBytes(16).toString('hex');
+  cert.validity.notBefore = new Date(Date.now() - 5 * 60 * 1000);
   cert.validity.notAfter = new Date();
   cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 10);
   const attrs = [
@@ -40,9 +41,11 @@ function generateCA() {
   ]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
 
-  fs.mkdirSync(CA_DIR, { recursive: true });
-  fs.writeFileSync(CA_CERT_PATH, forge.pki.certificateToPem(cert), 'utf8');
-  fs.writeFileSync(CA_KEY_PATH, forge.pki.privateKeyToPem(keys.privateKey), 'utf8');
+  fs.mkdirSync(CA_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CA_CERT_PATH, forge.pki.certificateToPem(cert), { encoding: 'utf8', mode: 0o644 });
+  fs.writeFileSync(CA_KEY_PATH, forge.pki.privateKeyToPem(keys.privateKey), { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(CA_DIR, 0o700); } catch (_) {}
+  try { fs.chmodSync(CA_KEY_PATH, 0o600); } catch (_) {}
   console.log(`✅ Root CA saved to ${CA_CERT_PATH}`);
   return { cert, key: keys.privateKey, certPem: forge.pki.certificateToPem(cert) };
 }
@@ -69,8 +72,8 @@ function getDomainCert(hostname) {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
   cert.publicKey = keys.publicKey;
-  cert.serialNumber = (Date.now() + Math.random()).toString(16);
-  cert.validity.notBefore = new Date();
+  cert.serialNumber = crypto.randomBytes(16).toString('hex');
+  cert.validity.notBefore = new Date(Date.now() - 5 * 60 * 1000);
   cert.validity.notAfter = new Date();
   cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 2);
 
@@ -79,6 +82,8 @@ function getDomainCert(hostname) {
   cert.setIssuer(ca.cert.subject.attributes);
   cert.setExtensions([
     { name: 'basicConstraints', cA: false },
+    { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+    { name: 'extKeyUsage', serverAuth: true },
     { name: 'subjectAltName', altNames: [{ type: 2, value: hostname }] },
     { name: 'subjectKeyIdentifier' },
   ]);

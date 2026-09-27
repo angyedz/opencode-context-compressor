@@ -20,15 +20,17 @@ const tls = require('tls');
 const url = require('url');
 
 const formats = require('./formats');
-const compressor = require('./compressor');
+const runtimePipeline = require('./context/runtime-pipeline');
+const tokenCalibration = require('./context/token-calibration');
 const commands = require('./commands');
 const memoStore = require('./memo-store');
 const { getDomainCert, getCA, CA_CERT_PATH } = require('./ca');
 
-const PORT = Number(process.env.PROXY_PORT || 3266);
+const PORT = process.env.PROXY_PORT === '0' ? 0 : Number(process.env.PROXY_PORT || 3266);
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 64 * 1024 * 1024);
 
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000 });
-const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000, rejectUnauthorized: false });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000, rejectUnauthorized: true });
 
 // ─── qwen-free-api fingerprint detection ────────────────────────────────────
 // Cache: 'host:port' → true (is qwen-free-api) | false
@@ -64,11 +66,35 @@ async function isQwenFreeApi(hostname, port) {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', () => resolve(Buffer.alloc(0)));
+    let total = 0;
+    let settled = false;
+
+    req.on('data', (chunk) => {
+      if (settled) return;
+      total += chunk.length;
+      if (total > MAX_BODY_BYTES) {
+        settled = true;
+        const error = new Error(`Request body exceeds ${MAX_BODY_BYTES} bytes`);
+        error.statusCode = 413;
+        reject(error);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+
+    req.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
   });
 }
 
@@ -85,8 +111,17 @@ function isAiPath(pathname) {
 // ─── Core interceptor ───────────────────────────────────────────────────────
 
 async function handleAiRequest(req, res, targetUrl, body) {
-  let parsed = {};
-  try { parsed = JSON.parse(body); } catch (_) {}
+  const contentEncoding = String(req.headers['content-encoding'] || '').toLowerCase();
+  if (contentEncoding && contentEncoding !== 'identity') {
+    return forwardRequest(req, res, body, targetUrl);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch (_) {
+    return forwardRequest(req, res, body, targetUrl);
+  }
 
   const pathname = targetUrl.pathname || req.url || '';
   const format = formats.detectFormat(pathname, parsed);
@@ -96,16 +131,26 @@ async function handleAiRequest(req, res, targetUrl, body) {
     return forwardRequest(req, res, body, targetUrl);
   }
 
+  const msgs = formats.extractMessages(parsed, format);
+  const explicitSessionId =
+    req.headers['x-session-id'] ||
+    req.headers['x-opencode-session'] ||
+    req.headers['x-opencode-session-id'] ||
+    null;
+  const sessionKey = memoStore.deriveSessionKey(msgs, {
+    sessionId: explicitSessionId,
+    provider: targetUrl.hostname || req.headers.host || 'provider',
+    model: parsed.model || '',
+  });
   const lastUserText = formats.getLastUserText(parsed, format);
-  const sessionKey = targetUrl.hostname || req.headers.host || 'default';
+
+  // Refresh temporary recall from the exact request before handling commands or compaction.
+  memoStore.syncMessages(sessionKey, msgs);
 
   // ── 1. Command interception: ALWAYS answered by compressor directly (0 LLM calls) ──
-  if (commands.isCommandMessage([{ role: 'user', content: lastUserText }])) {
-    const replyText = commands.executeCommand(
-      [{ role: 'user', content: lastUserText }],
-      sessionKey
-    );
-    const isStream = Boolean(parsed.stream);
+  if (commands.isCommandMessage(msgs)) {
+    const replyText = commands.executeCommand(msgs, sessionKey);
+    const isStream = Boolean(parsed.stream) || pathname.includes('streamGenerateContent');
 
     if (isStream) {
       res.writeHead(200, {
@@ -134,19 +179,23 @@ async function handleAiRequest(req, res, targetUrl, body) {
   }
 
   // ── 3. Normal request to external LLM: compress context → forward ──────
-  memoStore.syncMessages(sessionKey, formats.extractMessages(parsed, format));
-  const disabled = commands.isCompressorDisabled(sessionKey);
-  const maxChars = commands.getSessionLimit(sessionKey);
-  const msgs = formats.extractMessages(parsed, format);
-  const compressed = compressor.compressMessages(msgs, { disabled, maxChars });
-  const newBody = Buffer.from(JSON.stringify(formats.rebuildBody(parsed, compressed, format)));
+  const provider = targetUrl.hostname || req.headers.host || 'provider';
+  const model = parsed.model || '';
+  const runtime = runtimePipeline.compressAndRecord(msgs, sessionKey, { requestBody: parsed, provider, model });
+  const newBody = Buffer.from(JSON.stringify(formats.rebuildBody(parsed, runtime.messages, format)));
 
-  return forwardRequest(req, res, newBody, targetUrl);
+  return forwardRequest(req, res, newBody, targetUrl, {
+    calibration: {
+      provider,
+      model,
+      estimatedPromptTokens: runtime.report?.after?.tokens || 0,
+    },
+  });
 }
 
 // ─── HTTP forwarding ────────────────────────────────────────────────────────
 
-function forwardRequest(req, res, body, targetUrl) {
+function forwardRequest(req, res, body, targetUrl, context = {}) {
   const isHttps = targetUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
   const port = targetUrl.port || (isHttps ? 443 : 80);
@@ -154,10 +203,14 @@ function forwardRequest(req, res, body, targetUrl) {
 
   // Strip hop-by-hop headers that can't be forwarded
   const forwardHeaders = { ...req.headers };
-  delete forwardHeaders['proxy-connection'];
+  delete forwardHeaders['connection'];
+  delete forwardHeaders['keep-alive'];
+  delete forwardHeaders['proxy-authenticate'];
   delete forwardHeaders['proxy-authorization'];
+  delete forwardHeaders['proxy-connection'];
   delete forwardHeaders['te'];
   delete forwardHeaders['trailers'];
+  delete forwardHeaders['transfer-encoding'];
   delete forwardHeaders['upgrade'];
 
   const options = {
@@ -171,21 +224,42 @@ function forwardRequest(req, res, body, targetUrl) {
       'content-length': bodyBuf.length,
     },
     agent: isHttps ? httpsAgent : httpAgent,
-    rejectUnauthorized: false,
+    rejectUnauthorized: isHttps ? true : undefined,
   };
 
   const proxyReq = lib.request(options, (proxyRes) => {
     if (res.socket) res.socket.setNoDelay(true);
     if (proxyRes.socket) proxyRes.socket.setNoDelay(true);
 
+    const calibration = context.calibration;
+    const canInspectUsage = calibration && !String(proxyRes.headers['content-encoding'] || '').match(/gzip|br|deflate/i);
+    let usageHead = '';
+    let usageTail = '';
+
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
     proxyRes.on('data', (chunk) => {
+      if (canInspectUsage) {
+        const piece = chunk.toString('utf8');
+        if (usageHead.length < 65536) usageHead += piece.slice(0, 65536 - usageHead.length);
+        usageTail = (usageTail + piece).slice(-131072);
+      }
       res.write(chunk);
     });
 
     proxyRes.on('end', () => {
+      if (canInspectUsage) {
+        const actual = tokenCalibration.extractUsageFromText(usageHead + '\n' + usageTail);
+        if (actual !== null && calibration.estimatedPromptTokens > 0) {
+          tokenCalibration.record(
+            calibration.provider,
+            calibration.model,
+            calibration.estimatedPromptTokens,
+            actual
+          );
+        }
+      }
       res.end();
     });
 
@@ -196,11 +270,13 @@ function forwardRequest(req, res, body, targetUrl) {
 
   proxyReq.setNoDelay(true);
 
-  // If client cancels generation, abort request to upstream provider immediately
-  req.on('close', () => {
-    if (!proxyReq.destroyed) {
-      proxyReq.destroy();
-    }
+  // Abort upstream only when the client actually aborts, not on normal request completion.
+  const abortUpstream = () => {
+    if (!proxyReq.destroyed) proxyReq.destroy();
+  };
+  req.on('aborted', abortUpstream);
+  res.on('close', () => {
+    if (!res.writableEnded) abortUpstream();
   });
 
   proxyReq.on('error', (err) => {
@@ -222,10 +298,16 @@ const proxyServer = http.createServer(async (req, res) => {
   // Health check
   if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, service: 'context-compressor-proxy', port: PORT, ca: CA_CERT_PATH }));
+    return res.end(JSON.stringify({ ok: true, service: 'context-compressor-proxy', port: proxyServer.address()?.port || PORT, ca: CA_CERT_PATH }));
   }
 
-  const body = await readBody(req);
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (error) {
+    res.writeHead(error.statusCode || 400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(error.statusCode === 413 ? 'Payload Too Large' : 'Bad Request');
+  }
   const targetUrl = url.parse(req.url.startsWith('http') ? req.url : `http://${req.headers.host}${req.url}`);
 
   if (req.method === 'POST' && isAiPath(targetUrl.pathname || req.url)) {
@@ -257,7 +339,13 @@ proxyServer.on('connect', (req, clientSocket, head) => {
     (mitmSocket) => {
       // Parse HTTP requests coming over the decrypted TLS socket
       const innerHttp = http.createServer(async (innerReq, innerRes) => {
-        const body = await readBody(innerReq);
+        let body;
+        try {
+          body = await readBody(innerReq);
+        } catch (error) {
+          innerRes.writeHead(error.statusCode || 400, { 'Content-Type': 'text/plain; charset=utf-8' });
+          return innerRes.end(error.statusCode === 413 ? 'Payload Too Large' : 'Bad Request');
+        }
         const pathname = innerReq.url || '/';
         const targetUrl = {
           protocol: 'https:',
@@ -275,6 +363,8 @@ proxyServer.on('connect', (req, clientSocket, head) => {
       });
 
       innerHttp.emit('connection', mitmSocket);
+      // One ephemeral TLS listener per CONNECT tunnel; close the listener after accepting it.
+      mitmServer.close();
     }
   );
 
@@ -299,9 +389,9 @@ proxyServer.on('connect', (req, clientSocket, head) => {
 
 proxyServer.on('error', (err) => console.error('[proxy] server error:', err.message));
 
-proxyServer.listen(PORT, '0.0.0.0', () => {
+proxyServer.listen(PORT, '127.0.0.1', () => {
   const ca = getCA(); // ensure CA exists
-  console.log(`⚡ context-compressor MITM Proxy running on http://127.0.0.1:${PORT}`);
+  console.log(`⚡ context-compressor MITM Proxy running on http://127.0.0.1:${proxyServer.address().port}`);
   console.log(`🔐 Root CA certificate: ${CA_CERT_PATH}`);
   console.log(`   Install CA to trust HTTPS interception (see: node bin/cli.js install)`);
 });

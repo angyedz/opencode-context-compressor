@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+'use strict';
+
+const { spawn, spawnSync } = require('child_process');
+const fs = require('fs');
+const http = require('http');
+const net = require('net');
+const path = require('path');
+const { CA_CERT_PATH, getCA } = require('../src/ca');
+
+const configuredPort = process.env.CONTEXT_COMPRESSOR_PORT;
+const DEFAULT_PORT = configuredPort === '0' ? 0 : Number(configuredPort || 3266);
+let proxyPort = DEFAULT_PORT;
+let proxyUrl = `http://127.0.0.1:${proxyPort}`;
+const proxyScript = path.join(__dirname, '..', 'src', 'proxy.js');
+
+function resolveCommand(command) {
+  const names = process.platform === 'win32' ? [command + '.cmd', command + '.exe', command + '.bat', command] : [command];
+  for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
+    for (const name of names) { const candidate=path.join(dir,name); try { if(fs.statSync(candidate).isFile()) return candidate; } catch (_) {} }
+  }
+  return null;
+}
+
+function mergeNoProxy(env) {
+  const existing = String(env.NO_PROXY || env.no_proxy || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const merged = [...new Set([...existing, 'localhost', '127.0.0.1', '::1'])].join(',');
+  return { NO_PROXY: merged, no_proxy: merged };
+}
+
+function supportsStandalone(opencodeBin) {
+  try {
+    const result = spawnSync(opencodeBin, ['--help'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    return String(result.stdout || '') .includes('--standalone') ||
+      String(result.stderr || '').includes('--standalone');
+  } catch (_) {
+    return false;
+  }
+}
+
+function buildOpenCodeArgs(args, standaloneSupported) {
+  if (!standaloneSupported || args.includes('--standalone')) return args;
+  if (args.some((arg) => arg === '--server' || arg.startsWith('--server='))) return args;
+
+  const first = args[0] || '';
+  const passthroughCommands = new Set([
+    'auth', 'debug', 'service', 'serve', 'web', 'uninstall', 'upgrade', 'version',
+  ]);
+
+  if (first === 'run') return ['run', '--standalone', ...args.slice(1)];
+  if (passthroughCommands.has(first)) return args;
+  return ['--standalone', ...args];
+}
+
+function health(port, timeoutMs = 500) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: timeoutMs }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try { const data = JSON.parse(body); resolve(res.statusCode === 200 && data.service === 'context-compressor-proxy'); }
+        catch (_) { resolve(false); }
+      });
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+function freePort(start = DEFAULT_PORT) {
+  return new Promise((resolve, reject) => {
+    if (start === 0) {
+      const server = net.createServer(); server.unref(); server.once('error', reject);
+      return server.listen(0, '127.0.0.1', () => { const port=server.address().port; server.close(() => resolve(port)); });
+    }
+    const tryPort = (port) => {
+      const server = net.createServer();
+      server.unref();
+      server.once('error', (err) => err.code === 'EADDRINUSE' && port < start + 20 ? tryPort(port + 1) : reject(err));
+      server.listen(port, '127.0.0.1', () => server.close(() => resolve(port)));
+    };
+    tryPort(start);
+  });
+}
+
+function waitForProxy(timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const probe = () => {
+      health(proxyPort).then((ok) => ok ? resolve() : retry());
+    };
+    const retry = () => {
+      if (Date.now() >= deadline) return reject(new Error('context-compressor proxy did not become healthy'));
+      setTimeout(probe, 100);
+    };
+    probe();
+  });
+}
+
+async function main() {
+  const opencodeBin = resolveCommand('opencode');
+  if (!opencodeBin) {
+    console.error('opencode-cc: could not find "opencode" in PATH.');
+    process.exit(127);
+  }
+
+  getCA();
+
+  let proxy = null;
+  if (!await health(proxyPort, 300)) {
+    proxyPort = await freePort(DEFAULT_PORT);
+    proxyUrl = `http://127.0.0.1:${proxyPort}`;
+    proxy = spawn(process.execPath, [proxyScript], {
+      stdio: ['ignore', 'inherit', 'inherit'],
+      windowsHide: true,
+      env: { ...process.env, PROXY_PORT: String(proxyPort) },
+    });
+    proxy.once('exit', (code) => {
+      if (code && !process.exitCode) process.exitCode = code;
+    });
+    await waitForProxy();
+  }
+
+  const noProxy = mergeNoProxy(process.env);
+  const env = {
+    ...process.env,
+    ...noProxy,
+    HTTP_PROXY: proxyUrl,
+    HTTPS_PROXY: proxyUrl,
+    http_proxy: proxyUrl,
+    https_proxy: proxyUrl,
+    NODE_EXTRA_CA_CERTS: CA_CERT_PATH,
+  };
+
+  const originalArgs = process.argv.slice(2);
+  const opencodeArgs = buildOpenCodeArgs(originalArgs, supportsStandalone(opencodeBin));
+  if (originalArgs.some((arg) => arg === '--server' || arg.startsWith('--server='))) {
+    console.warn('opencode-cc: --server uses a separate OpenCode server; provider traffic may not pass through this local compressor.');
+  }
+
+  const child = spawn(opencodeBin, opencodeArgs, {
+    stdio: 'inherit',
+    env,
+    shell: false,
+    windowsHide: false,
+  });
+
+  const stopProxy = () => {
+    if (proxy && !proxy.killed) {
+      try { proxy.kill(); } catch (_) {}
+    }
+  };
+
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+      if (!child.killed) {
+        try { child.kill(signal); } catch (_) {}
+      }
+      stopProxy();
+    });
+  }
+
+  child.on('error', (error) => {
+    console.error('opencode-cc:', error.message);
+    stopProxy();
+    process.exitCode = 1;
+  });
+
+  child.on('exit', (code, signal) => {
+    stopProxy();
+    if (signal) process.exitCode = 1;
+    else process.exitCode = code == null ? 1 : code;
+  });
+}
+
+module.exports = { mergeNoProxy, buildOpenCodeArgs, supportsStandalone };
+
+if (require.main === module) main().catch((error) => {
+  console.error('opencode-cc:', error.message);
+  process.exitCode = 1;
+});

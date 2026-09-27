@@ -1,15 +1,7 @@
 'use strict';
 
-/**
- * opencode-context-compressor Local Proxy & Interceptor Server (Port 3266)
- * 
- * Intercepts incoming completion requests from OpenCode:
- * 1. If $context-compressor command is sent: The compressor ITSELF answers in 1ms. ZERO LLM calls!
- * 2. If normal request: Syncs memory to model-memo and applies RTK/skeletonizer context compression.
- */
-
 const http = require('http');
-const compressor = require('./compressor');
+const runtimePipeline = require('./context/runtime-pipeline');
 const memoStore = require('./memo-store');
 const commands = require('./commands');
 
@@ -25,9 +17,7 @@ function formatStreamChunk(text, id = 'cmd-1') {
   })}\n\n`;
 }
 
-function formatStreamDone() {
-  return 'data: [DONE]\n\n';
-}
+function formatStreamDone() { return 'data: [DONE]\n\n'; }
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
@@ -43,10 +33,16 @@ const server = http.createServer((req, res) => {
       try { parsed = JSON.parse(body); } catch (_) {}
 
       const messages = parsed.messages || [];
-      const sessionKey = req.headers['x-session-id'] || 'default-session';
+      const explicitSession = req.headers['x-session-id'];
+      const sessionKey = explicitSession || memoStore.deriveSessionKey(messages, {
+        provider: 'openai',
+        model: parsed.model || '',
+      });
       const streamRequested = parsed.stream === true;
 
-      // 1. Intercept in-chat $context-compressor commands: COMPRESSOR ITSELF ANSWERS DIRECTLY
+      // Keep local commands on the same exact-session snapshot as normal requests.
+      memoStore.syncMessages(sessionKey, messages);
+
       if (commands.isCommandMessage(messages)) {
         const replyText = commands.executeCommand(messages, sessionKey);
         res.writeHead(200, {
@@ -59,23 +55,17 @@ const server = http.createServer((req, res) => {
           res.write(formatStreamChunk(replyText));
           res.write(formatStreamDone());
           return res.end();
-        } else {
-          return res.end(JSON.stringify({
-            id: 'chatcmpl-cmd-local',
-            object: 'chat.completion',
-            created: Math.floor(Date.now() / 1000),
-            model: 'context-compressor-local',
-            choices: [{ index: 0, message: { role: 'assistant', content: replyText }, finish_reason: 'stop' }],
-          }));
         }
+        return res.end(JSON.stringify({
+          id: 'chatcmpl-cmd-local',
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: 'context-compressor-local',
+          choices: [{ index: 0, message: { role: 'assistant', content: replyText }, finish_reason: 'stop' }],
+        }));
       }
 
-      // 2. Sync history to persistent model-memo store
-      memoStore.syncMessages(sessionKey, messages);
-
-      // 3. Compress context
-      const disabled = commands.isCompressorDisabled(sessionKey);
-      const compressed = compressor.compressMessages(messages, { disabled });
+      const compressed = runtimePipeline.compressAndRecord(messages, sessionKey, { requestBody: parsed }).messages;
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ...parsed, messages: compressed }));
