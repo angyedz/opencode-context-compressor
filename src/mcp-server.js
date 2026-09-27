@@ -49,6 +49,7 @@ function listTools(id) {
             type: 'object',
             properties: {
               query: { type: 'string', description: 'recent, first, step #N, 10m, or keywords.' },
+              session_id: { type: 'string', description: 'Optional exact session key when multiple OpenCode sessions are active.' },
               max_chars: { type: 'number', minimum: 200, maximum: 6000 },
             },
           },
@@ -61,6 +62,7 @@ function listTools(id) {
             properties: {
               note: { type: 'string' },
               category: { type: 'string' },
+              session_id: { type: 'string', description: 'Optional exact session key.' },
             },
             required: ['note'],
           },
@@ -145,11 +147,11 @@ rl.on('line', (line) => {
 
     try {
       if (name === 'memo_recall') {
-        return ok(id, memoStore.recall(null, args.query || 'recent', args.max_chars || 1600));
+        return ok(id, memoStore.recall(args.session_id || null, args.query || 'recent', args.max_chars || 1600));
       }
 
       if (name === 'memo_save') {
-        memoStore.saveExplicit(null, args.note || '', args.category || 'session_note');
+        memoStore.saveExplicit(args.session_id || null, args.note || '', args.category || 'session_note');
         return ok(id, 'Saved a temporary note for the active conversation.');
       }
 
