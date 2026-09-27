@@ -15,12 +15,14 @@ function planInputEnvelope({
   directiveTokens=320,
   requestedHistoryTokens=null,
   minimumHistoryTokens=256,
+  tokenScale=1,
 }={}){
   const maxInput=positiveNumber(maxInputTokens,null);
   const reserve=Math.max(0,positiveNumber(reserveOutputTokens,4096));
-  const systemTokens=estimateMessagesTokens(systemMessages);
-  const activeTokens=estimateMessagesTokens(activeTurn);
-  const directive=Math.max(0,positiveNumber(directiveTokens,320));
+  const scale=Math.max(0.25,Math.min(4,positiveNumber(tokenScale,1)));
+  const systemTokens=Math.ceil(estimateMessagesTokens(systemMessages)*scale);
+  const activeTokens=Math.ceil(estimateMessagesTokens(activeTurn)*scale);
+  const directive=Math.ceil(Math.max(0,positiveNumber(directiveTokens,320))*scale);
   const requested=positiveNumber(requestedHistoryTokens,null);
 
   if(!maxInput){
@@ -34,6 +36,7 @@ function planInputEnvelope({
       requestedHistoryTokens:requested,
       availableHistoryTokens:requested,
       overcommitted:false,
+      tokenScale:scale,
     };
   }
 
@@ -56,13 +59,15 @@ function planInputEnvelope({
     overcommitted,
     fixedTokens:fixed,
     headroomTokens:maxInput-(fixed+history),
+    tokenScale:scale,
   };
 }
 
 function historyCharBudgetFromEnvelope(plan,{charsPerToken=3.2,minChars=800,maxChars=Infinity}={}){
   if(!plan?.bounded||plan.availableHistoryTokens===null||plan.availableHistoryTokens===undefined) return maxChars;
   if(plan.availableHistoryTokens<=0) return 0;
-  const raw=Math.max(0,Math.floor(plan.availableHistoryTokens*charsPerToken));
+  const scale=Math.max(0.25,Math.min(4,Number(plan.tokenScale)||1));
+  const raw=Math.max(0,Math.floor(plan.availableHistoryTokens*(charsPerToken/scale)));
   // Never exceed the actual envelope merely to satisfy a convenience minimum.
   // minChars is advisory only when the envelope can afford it.
   if(raw<minChars) return Math.min(maxChars,raw);
@@ -78,6 +83,7 @@ function envelopeReport(plan){
     `reserve=${plan.reserveOutputTokens}`,
     `headroom=${plan.headroomTokens}`,
     `overcommitted=${plan.overcommitted}`,
+    `scale=${plan.tokenScale || 1}`,
   ].join(' ');
 }
 
