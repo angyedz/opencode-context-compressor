@@ -15,26 +15,25 @@ process.env.PROFILE_FILE = path.join(root, 'profile.json');
 const memoStore = require('../src/memo-store');
 const profileStore = require('../src/profile-store');
 
-test('switching sessions replaces full conversation memory instead of retaining old chat history', () => {
-  memoStore.clear();
+test('parallel sessions remain isolated without leaking into each other', () => {
+  memoStore.clear('session-a');
+  memoStore.clear('session-b');
 
   memoStore.syncMessages('session-a', [
-    { role: 'user', content: 'ALPHA_SECRET_SESSION_DETAIL' },
+    { role: 'user', content: 'ALPHA_SESSION_DETAIL' },
     { role: 'assistant', content: 'alpha answer' },
   ]);
-  assert.match(memoStore.recall(null, 'alpha', 2000), /ALPHA_SECRET_SESSION_DETAIL/);
-
   memoStore.syncMessages('session-b', [
     { role: 'user', content: 'BETA_ACTIVE_DETAIL' },
     { role: 'assistant', content: 'beta answer' },
   ]);
 
-  const old = memoStore.recall('session-a', 'alpha', 2000);
-  const active = memoStore.recall(null, 'beta', 2000);
-
-  assert.match(old, /not active/i);
-  assert.doesNotMatch(active, /ALPHA_SECRET_SESSION_DETAIL/);
-  assert.match(active, /BETA_ACTIVE_DETAIL/);
+  const alpha = memoStore.recall('session-a', 'alpha', 2000);
+  const beta = memoStore.recall('session-b', 'beta', 2000);
+  assert.match(alpha, /ALPHA_SESSION_DETAIL/);
+  assert.doesNotMatch(alpha, /BETA_ACTIVE_DETAIL/);
+  assert.match(beta, /BETA_ACTIVE_DETAIL/);
+  assert.doesNotMatch(beta, /ALPHA_SESSION_DETAIL/);
 });
 
 test('durable profile stores only explicitly remembered concise facts', () => {
@@ -48,7 +47,7 @@ test('durable profile stores only explicitly remembered concise facts', () => {
   assert.ok(facts.some((fact) => fact.text.includes('Node.js 20')));
 
   const disk = fs.readFileSync(process.env.PROFILE_FILE, 'utf8');
-  assert.doesNotMatch(disk, /ALPHA_SECRET_SESSION_DETAIL/);
+  assert.doesNotMatch(disk, /ALPHA_SESSION_DETAIL/);
   assert.match(disk, /Prefers concise technical answers/);
 });
 
