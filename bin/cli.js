@@ -7,10 +7,11 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 
 const HOME = os.homedir();
+const CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config');
 const PROJECT_DIR = path.resolve(__dirname, '..');
 const MCP_SERVER_SCRIPT = path.join(PROJECT_DIR, 'src', 'mcp-server.js');
 const NODE_BIN = process.execPath;
-const OPENCODE_CONFIG = process.env.OPENCODE_CONFIG || path.join(HOME, '.config', 'opencode', 'opencode.json');
+const OPENCODE_CONFIG = process.env.OPENCODE_CONFIG || path.join(CONFIG_HOME, 'opencode', 'opencode.json');
 const CA_CERT_PATH = path.join(HOME, '.context-compressor', 'ca', 'ca.crt');
 
 function installCA() {
