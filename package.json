@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node src/mcp-server.js",
     "test": "node --test test/*.test.js",
-    "benchmark": "node bench/context-benchmark.js"
+    "benchmark": "node bench/context-benchmark.js",
+    "benchmark:quality": "node bench/quality-benchmark.js"
   },
   "keywords": [
     "opencode",
