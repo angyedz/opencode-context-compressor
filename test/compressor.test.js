@@ -17,6 +17,7 @@ const {
   collectRankedAnchors,
   scoreFact,
   buildStateSnapshot,
+  factEntities,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -218,4 +219,25 @@ test('working-state snapshot separates blockers, constraints and pending work', 
   assert.match(snapshot, /blockers:/);
   assert.match(snapshot, /constraints:/);
   assert.match(snapshot, /pending:/);
+});
+
+
+test('entity relevance strongly promotes the exact file/function needed by the active task', () => {
+  const related = 'Error: src/auth/session.js validateSession(token) rejects refresh tokens.';
+  const unrelated = 'Error: src/ui/theme.js renderTheme(config) failed snapshot test.';
+  assert.ok(
+    scoreFact(related, 'Fix validateSession(token) in src/auth/session.js') >
+    scoreFact(unrelated, 'Fix validateSession(token) in src/auth/session.js')
+  );
+  assert.ok(factEntities(related).some((x) => x.includes('src/auth/session.js')));
+});
+
+test('newer facts supersede stale facts about the same entity/topic', () => {
+  const turns = [
+    [{ role: 'assistant', content: 'Decision: src/server/config.js port must be 3000.' }],
+    [{ role: 'assistant', content: 'Decision: src/server/config.js port must be 8080.' }],
+  ];
+  const anchors = collectRankedAnchors(turns, 'continue src/server/config.js', 10).join('\n');
+  assert.match(anchors, /8080/);
+  assert.doesNotMatch(anchors, /3000/);
 });
