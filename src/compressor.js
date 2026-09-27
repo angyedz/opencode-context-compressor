@@ -1,6 +1,8 @@
 'use strict';
 
 const profileStore = require('./profile-store');
+const tokenBudget = require('./context/token-budget');
+const protocolIntegrity = require('./context/protocol-integrity');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -774,9 +776,12 @@ function compressMessages(rawMessages, options = {}) {
   const cleaned = stripCommands(rawMessages);
   if (!cleaned.length) return [];
 
-  const requestedTokens = Number(options.maxTokens);
-  const tokenDerivedChars = Number.isFinite(requestedTokens) && requestedTokens > 0 ? Math.floor(requestedTokens * 3.2) : Infinity;
-  const maxChars = Math.max(MIN_HISTORY_CHARS, Math.min(Number(options.maxChars) || MAX_HISTORY_CHARS, tokenDerivedChars));
+  const maxChars = tokenBudget.deriveCharBudget({
+    maxChars: options.maxChars,
+    maxTokens: options.maxTokens,
+    defaultChars: MAX_HISTORY_CHARS,
+    minChars: MIN_HISTORY_CHARS,
+  });
   const system = cleaned.filter((message) => message?.role === 'system');
   const conversation = cleaned.filter((message) => message?.role !== 'system');
 
@@ -811,11 +816,13 @@ function compressMessages(rawMessages, options = {}) {
     boundedHistory = boundRecentHistory(splitTurns(boundedHistory), maxChars, extractText(activeTurn[0]?.content));
   }
 
-  return injectSystemDirective([
+  const output = injectSystemDirective([
     ...system,
     ...boundedHistory,
     ...activeTurn,
   ]);
+  protocolIntegrity.assertToolProtocol(output);
+  return output;
 }
 
 module.exports = {
