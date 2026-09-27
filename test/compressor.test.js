@@ -90,3 +90,24 @@ test('ordinary assistant messages containing emoji are not mistaken for compress
   assert.equal(output.length, 3);
   assert.equal(output[1].content, '⚡ normal answer that must remain');
 });
+
+
+test('compression ratio is extreme on stale tool-heavy history without touching current request', () => {
+  const messages = [{ role: 'system', content: 'coding agent' }];
+  for (let i = 0; i < 80; i += 1) {
+    messages.push({ role: 'user', content: 'inspect build state ' + i });
+    messages.push({ role: 'assistant', content: 'checking logs', tool_calls: [{ id: 'c' + i, type: 'function', function: { name: 'shell', arguments: '{"cmd":"test"}' } }] });
+    messages.push({ role: 'tool', tool_call_id: 'c' + i, name: 'shell', content: ('progress line\\n').repeat(700) + 'RESULT=' + i });
+    messages.push({ role: 'assistant', content: 'result ' + i + ' recorded' });
+  }
+  const current = 'CURRENT REQUEST EXACT';
+  messages.push({ role: 'user', content: current });
+
+  const before = messagesSize(messages);
+  const compressed = compressMessages(messages, { maxChars: 6000 });
+  const after = messagesSize(compressed);
+
+  assert.equal(compressed[compressed.length - 1].content, current);
+  assert.ok(after < before / 20, 'expected at least 20x request-size reduction on synthetic stale logs');
+  assert.ok(messagesSize(historicalMessages(compressed)) <= 6000);
+});
