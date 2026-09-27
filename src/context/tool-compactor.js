@@ -35,7 +35,8 @@ function stableFingerprint(text){
     .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|seconds)\b/gi,'<duration>')
     .replace(/\bpid\s*[=:]?\s*\d+\b/gi,'pid=<n>')
     .replace(/\/tmp\/[A-Za-z0-9_.-]+/g,'/tmp/<temp>')
-    .replace(/[A-Fa-f0-9]{16,}/g,'<hex>')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi,'<uuid>')
+    .replace(/\b(request|trace|span|session|run)[-_ ]?(?:id)?[=: ]+[A-Za-z0-9_.:-]{8,}\b/gi,'$1-id=<volatile>')
     .replace(/\s+/g,' ')
     .trim()
     .slice(0,16000);
