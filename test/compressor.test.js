@@ -12,6 +12,7 @@ const {
   messagesSize,
   splitTurns,
   stripCommands,
+  hasStructuredContent,
 } = require('../src/compressor');
 
 function historicalMessages(messages) {
