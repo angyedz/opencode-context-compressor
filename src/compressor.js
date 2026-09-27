@@ -363,10 +363,18 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
     if (state === 'open' && resolvedTopics.has(topic)) continue;
     lifecycleFiltered.push(entry);
   }
-  return lifecycleFiltered
-    .sort((a, b) => b.score - a.score || a.recency - b.recency)
-    .slice(0, limit)
-    .map((entry) => entry.fact);
+  const sorted = lifecycleFiltered.sort((a, b) => b.score - a.score || a.recency - b.recency);
+  const diverse = [];
+  const entityCounts = new Map();
+  for (const entry of sorted) {
+    const primary = factEntities(entry.fact)[0] || factTopicKey(entry.fact);
+    const count = entityCounts.get(primary) || 0;
+    if (count >= 3 && diverse.length >= Math.min(8, limit)) continue;
+    diverse.push(entry);
+    entityCounts.set(primary, count + 1);
+    if (diverse.length >= limit) break;
+  }
+  return diverse.map((entry) => entry.fact);
 }
 
 function summarizeMessage(message) {
