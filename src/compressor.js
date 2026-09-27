@@ -563,9 +563,43 @@ function makeHistorySummary(text) {
   };
 }
 
+function isHistorySummary(message) {
+  return message?.role === 'user' &&
+    typeof message?.content === 'string' &&
+    message.content.startsWith('<compacted_history>');
+}
+
+function trimHistorySummaryMessage(message, maxSize) {
+  if (!isHistorySummary(message) || maxSize <= 0 || messageSize(message) <= maxSize) return message;
+  const text = String(message.content);
+  const openEnd = text.indexOf('\n\n');
+  const close = '\n</compacted_history>';
+  const closeIndex = text.lastIndexOf(close);
+  if (openEnd < 0 || closeIndex < 0 || closeIndex <= openEnd) return message;
+
+  const prefix = text.slice(0, openEnd + 2);
+  const inner = text.slice(openEnd + 2, closeIndex);
+  const overhead = messageSize({ ...message, content: prefix + close }) + 32;
+  const allowed = Math.max(0, maxSize - overhead);
+  const markerText = '\n... [historical summary truncated to budget] ...\n';
+  let nextInner = inner;
+  if (inner.length > allowed) {
+    if (allowed <= markerText.length + 40) {
+      nextInner = inner.slice(0, Math.max(0, allowed));
+    } else {
+      const remain = allowed - markerText.length;
+      const head = Math.floor(remain * 0.62);
+      const tail = remain - head;
+      nextInner = inner.slice(0, head) + markerText + inner.slice(-tail);
+    }
+  }
+  return { ...message, content: prefix + nextInner + close };
+}
+
 function trimMessageTo(message, maxSize) {
   if (!message || maxSize <= 0) return message;
   if (messageSize(message) <= maxSize) return message;
+  if (isHistorySummary(message)) return trimHistorySummaryMessage(message, maxSize);
 
   if (hasStructuredContent(message) || message.tool_calls || message.function_call) return message;
   const text = extractText(message.content);
@@ -692,13 +726,13 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
   while (messagesSize(result) > maxChars && result.length > 1 && result[0]?.content?.startsWith?.('<compacted_history>')) {
     const summaryMsg = result[0];
     const over = messagesSize(result) - maxChars;
-    const currentText = extractText(summaryMsg.content);
-    const nextLen = Math.max(0, currentText.length - over - 64);
-    if (nextLen < 180) {
+    const targetSize = Math.max(220, messageSize(summaryMsg) - over - 64);
+    const trimmed = trimHistorySummaryMessage(summaryMsg, targetSize);
+    if (messageSize(trimmed) >= messageSize(summaryMsg) || messageSize(trimmed) < 220) {
       result.shift();
       break;
     }
-    result[0] = { ...summaryMsg, content: currentText.slice(0, nextLen) };
+    result[0] = trimmed;
   }
 
   if (messagesSize(result) > maxChars && result.length) {
@@ -856,5 +890,7 @@ module.exports = {
   lifecycleTopic,
   hasStructuredContent,
   boundRecentHistory,
+  isHistorySummary,
+  trimHistorySummaryMessage,
   MAX_HISTORY_CHARS,
 };
