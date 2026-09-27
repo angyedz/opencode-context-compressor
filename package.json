@@ -5,7 +5,8 @@
   "main": "src/plugin.js",
   "bin": {
     "context-compressor": "bin/cli.js",
-    "opencode-context-compressor": "bin/cli.js"
+    "opencode-context-compressor": "bin/cli.js",
+    "opencode-cc": "bin/opencode-cc.js"
   },
   "scripts": {
     "start": "node src/mcp-server.js",
