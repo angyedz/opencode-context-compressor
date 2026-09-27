@@ -1,131 +1,91 @@
 #!/usr/bin/env node
 'use strict';
 
-/**
- * opencode-context-compressor CLI Installer
- *
- * Commands:
- *   node bin/cli.js install   — Full install: local CA, wrapper script, MCP registration, systemd service
- *   node bin/cli.js uninstall — Remove wrapper script and systemd service
- *   node bin/cli.js status    — Show proxy status and memory stats
- */
-
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const HOME = os.homedir();
 const PROJECT_DIR = path.resolve(__dirname, '..');
-const DAEMON_SCRIPT = path.join(PROJECT_DIR, 'src', 'daemon.js');
 const MCP_SERVER_SCRIPT = path.join(PROJECT_DIR, 'src', 'mcp-server.js');
 const NODE_BIN = process.execPath;
+const OPENCODE_CONFIG = process.env.OPENCODE_CONFIG || path.join(HOME, '.config', 'opencode', 'opencode.json');
+const CA_CERT_PATH = path.join(HOME, '.context-compressor', 'ca', 'ca.crt');
 
-const OPENCODE_CONFIG = path.join(HOME, '.config', 'opencode', 'opencode.json');
-
-const CA_DIR = path.join(HOME, '.context-compressor', 'ca');
-const CA_CERT_PATH = path.join(CA_DIR, 'ca.crt');
-
-// ─── CA trust installation ───────────────────────────────────────────────────
-
-function installCATrust() {
+function installCA() {
   if (!fs.existsSync(CA_CERT_PATH)) {
-    console.log('🔐 Root CA not yet generated — generating it locally...');
-    spawnSync(NODE_BIN, ['-e', `require('${path.join(PROJECT_DIR, 'src', 'ca.js')}').getCA()`], { timeout: 15000 });
+    const result = spawnSync(NODE_BIN, ['-e', `require(${JSON.stringify(path.join(PROJECT_DIR, 'src', 'ca.js'))}).getCA()`], {
+      stdio: 'inherit',
+      timeout: 30000,
+    });
+    if (result.status !== 0 || !fs.existsSync(CA_CERT_PATH)) throw new Error('local CA generation failed');
   }
-
-  if (!fs.existsSync(CA_CERT_PATH)) {
-    throw new Error('CA certificate generation failed');
-  }
-
-  console.log(`🔐 Local Root CA: ${CA_CERT_PATH}`);
-  console.log('✅ System trust store was NOT modified.');
-  console.log('   The opencode-cc wrapper trusts this CA only for its own Node.js process via NODE_EXTRA_CA_CERTS.');
+  console.log(`Local CA: ${CA_CERT_PATH}`);
+  console.log('System trust store was NOT modified.');
 }
 
-// ─── MCP registration ────────────────────────────────────────────────────────
+function readConfig() {
+  if (!fs.existsSync(OPENCODE_CONFIG)) return {};
+  try { return JSON.parse(fs.readFileSync(OPENCODE_CONFIG, 'utf8')); }
+  catch (error) { throw new Error(`OpenCode config is not valid JSON: ${OPENCODE_CONFIG}: ${error.message}`); }
+}
+
+function writeConfig(config) {
+  fs.mkdirSync(path.dirname(OPENCODE_CONFIG), { recursive: true });
+  const tmp = OPENCODE_CONFIG + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, OPENCODE_CONFIG);
+}
 
 function installMCP() {
-  fs.mkdirSync(path.dirname(OPENCODE_CONFIG), { recursive: true });
-  let config = {};
-  if (fs.existsSync(OPENCODE_CONFIG)) {
-    try { config = JSON.parse(fs.readFileSync(OPENCODE_CONFIG, 'utf8')); } catch (_) {}
-  }
-  if (!config.mcp || typeof config.mcp !== 'object') config.mcp = {};
-  config.mcp['model-memo'] = {
-    type: 'local',
-    command: [NODE_BIN, MCP_SERVER_SCRIPT],
-    enabled: true,
-  };
-  // Remove legacy plugin entry (no longer needed — proxy handles interception)
+  const config = readConfig();
+  if (!config.mcp || typeof config.mcp !== 'object' || Array.isArray(config.mcp)) config.mcp = {};
+  config.mcp['model-memo'] = { type: 'local', command: [NODE_BIN, MCP_SERVER_SCRIPT], enabled: true };
   if (Array.isArray(config.plugin)) {
-    config.plugin = config.plugin.filter((p) => !p.includes('context-compressor'));
-    if (config.plugin.length === 0) delete config.plugin;
+    config.plugin = config.plugin.filter((entry) => !String(entry).includes('context-compressor'));
+    if (!config.plugin.length) delete config.plugin;
   }
-  fs.writeFileSync(OPENCODE_CONFIG, JSON.stringify(config, null, 2));
-  console.log(`✅ model-memo MCP server registered in ${OPENCODE_CONFIG}`);
+  writeConfig(config);
+  console.log(`Registered model-memo MCP in ${OPENCODE_CONFIG}`);
 }
-
-// ─── Install ─────────────────────────────────────────────────────────────────
-
-function install() {
-  console.log('⚡ Installing opencode-context-compressor (MITM Proxy mode)...\n');
-  installMCP();
-  installCATrust();
- 
-  console.log(`
-🎉 Installation complete!
-
-  ${daemonInstalled ? 'Start OpenCode through the proxy:' : 'The integration files are installed, but automatic daemon startup was not confirmed. Start the proxy manually before OpenCode:'}
-    opencode-cc
-
-  The launcher starts and stops the local proxy automatically.
-    HTTP_PROXY=http://127.0.0.1:3266 HTTPS_PROXY=http://127.0.0.1:3266 opencode
-
-  In-chat commands:
-    $context-compressor status
-    $context-compressor on / off
-    $context-compressor help
-`);
-}
-
-// ─── Status ──────────────────────────────────────────────────────────────────
-
-function status() {
-  const memoStore = require('../src/memo-store');
-  const stats = memoStore.stats();
-  console.log('⚡ opencode-context-compressor Status');
-  console.log(`- Proxy: http://127.0.0.1:3266`);
-  console.log(`- CA Cert: ${CA_CERT_PATH} (${fs.existsSync(CA_CERT_PATH) ? '✅ exists' : '❌ missing'})`);
-  console.log(`- Memory Checkpoints: ${stats.entries} items across ${stats.sessions} session(s)`);
-  try {
-    const svc = execSync('systemctl --user is-active context-compressor.service', { encoding: 'utf8' }).trim();
-    console.log(`- Systemd Service: 🟢 ${svc}`);
-  } catch (_) {
-    console.log(`- Systemd Service: 🔴 inactive`);
-  }
-}
-
-// ─── Uninstall ───────────────────────────────────────────────────────────────
 
 function uninstall() {
-  if (fs.existsSync(OPENCODE_CONFIG)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(OPENCODE_CONFIG, 'utf8'));
-      if (config.mcp && typeof config.mcp === 'object') {
-        delete config.mcp['model-memo'];
-        if (Object.keys(config.mcp).length === 0) delete config.mcp;
-      }
-      fs.writeFileSync(OPENCODE_CONFIG, JSON.stringify(config, null, 2));
-    } catch (_) {}
+  const config = readConfig();
+  if (config.mcp && typeof config.mcp === 'object') {
+    delete config.mcp['model-memo'];
+    if (!Object.keys(config.mcp).length) delete config.mcp;
+    writeConfig(config);
   }
-
-  console.log('✅ opencode-context-compressor uninstalled. Durable profile data and the local CA were left in place.');
+  console.log('Removed model-memo MCP registration. Local CA and durable profile were left untouched.');
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+function status() {
+  const memo = require('../src/memo-store').stats();
+  console.log('opencode-context-compressor');
+  console.log(`- launcher: opencode-cc`);
+  console.log(`- proxy: starts on demand at http://127.0.0.1:3266`);
+  console.log(`- local CA: ${fs.existsSync(CA_CERT_PATH) ? 'ready' : 'not generated yet'}`);
+  console.log(`- temporary sessions: ${memo.sessions}; checkpoints: ${memo.entries}`);
+}
 
-const arg = (process.argv[2] || 'install').toLowerCase();
-if (arg === 'status') status();
-else if (arg === 'uninstall') uninstall();
-else install();
+function install() {
+  installMCP();
+  installCA();
+  console.log('\nReady. Start OpenCode with:\n  opencode-cc\n');
+  console.log('The launcher starts the local proxy on demand and stops the proxy it owns when OpenCode exits.');
+}
+
+const command = String(process.argv[2] || 'install').toLowerCase();
+try {
+  if (command === 'uninstall') uninstall();
+  else if (command === 'status') status();
+  else if (command === 'install') install();
+  else {
+    console.error('Usage: context-compressor [install|status|uninstall]');
+    process.exitCode = 2;
+  }
+} catch (error) {
+  console.error('context-compressor:', error.message);
+  process.exitCode = 1;
+}
