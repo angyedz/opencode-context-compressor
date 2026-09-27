@@ -199,10 +199,14 @@ function forwardRequest(req, res, body, targetUrl) {
 
   // Strip hop-by-hop headers that can't be forwarded
   const forwardHeaders = { ...req.headers };
-  delete forwardHeaders['proxy-connection'];
+  delete forwardHeaders['connection'];
+  delete forwardHeaders['keep-alive'];
+  delete forwardHeaders['proxy-authenticate'];
   delete forwardHeaders['proxy-authorization'];
+  delete forwardHeaders['proxy-connection'];
   delete forwardHeaders['te'];
   delete forwardHeaders['trailers'];
+  delete forwardHeaders['transfer-encoding'];
   delete forwardHeaders['upgrade'];
 
   const options = {
