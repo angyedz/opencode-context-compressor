@@ -703,6 +703,7 @@ function compressMessages(rawMessages, options = {}) {
       activeTurn,
       directiveTokens: tokenBudget.estimateTokens(buildDirective()),
       requestedHistoryTokens: Number(options.maxTokens) > 0 ? Number(options.maxTokens) : null,
+      tokenScale: options.tokenScale,
     });
     const envelopeChars = envelopeBudget.historyCharBudgetFromEnvelope(envelope, {
       minChars: 800,
