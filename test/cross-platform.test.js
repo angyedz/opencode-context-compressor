@@ -24,3 +24,19 @@ test('MCP temporary recall supports explicit concurrent-session routing', () => 
   assert.match(mcp, /session_id/);
   assert.match(mcp, /memoStore\.recall\(args\.session_id \|\| null/);
 });
+
+
+test('launcher verifies proxy identity and can move away from an occupied default port', () => {
+  const launcher = source('bin/opencode-cc.js');
+  assert.match(launcher, /context-compressor-proxy/);
+  assert.match(launcher, /freePort/);
+  assert.match(launcher, /PROXY_PORT: String\(proxyPort\)/);
+});
+
+test('CI executes on Linux macOS and Windows', () => {
+  const workflow = source('.github/workflows/ci.yml');
+  assert.match(workflow, /ubuntu-latest/);
+  assert.match(workflow, /macos-latest/);
+  assert.match(workflow, /windows-latest/);
+  assert.doesNotMatch(workflow, /shell:\s*bash/);
+});
