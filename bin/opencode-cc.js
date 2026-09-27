@@ -2,6 +2,7 @@
 'use strict';
 
 const { spawn, spawnSync } = require('child_process');
+const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const path = require('path');
@@ -13,9 +14,12 @@ let proxyPort = DEFAULT_PORT;
 let proxyUrl = `http://127.0.0.1:${proxyPort}`;
 const proxyScript = path.join(__dirname, '..', 'src', 'proxy.js');
 
-function commandExists(command) {
-  const probe = spawnSync(command, ['--version'], { stdio: 'ignore', shell: false });
-  return !probe.error;
+function resolveCommand(command) {
+  const names = process.platform === 'win32' ? [command + '.cmd', command + '.exe', command + '.bat', command] : [command];
+  for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
+    for (const name of names) { const candidate=path.join(dir,name); try { if(fs.statSync(candidate).isFile()) return candidate; } catch (_) {} }
+  }
+  return null;
 }
 
 function health(port, timeoutMs = 500) {
@@ -64,7 +68,8 @@ function waitForProxy(timeoutMs = 10000) {
 }
 
 async function main() {
-  if (!commandExists('opencode')) {
+  const opencodeBin = resolveCommand('opencode');
+  if (!opencodeBin) {
     console.error('opencode-cc: could not find "opencode" in PATH.');
     process.exit(127);
   }
@@ -95,10 +100,10 @@ async function main() {
     NODE_EXTRA_CA_CERTS: CA_CERT_PATH,
   };
 
-  const child = spawn('opencode', process.argv.slice(2), {
+  const child = spawn(opencodeBin, process.argv.slice(2), {
     stdio: 'inherit',
     env,
-    shell: process.platform === 'win32',
+    shell: false,
     windowsHide: false,
   });
 
