@@ -34,3 +34,41 @@ test('assertToolProtocol attaches a machine-readable failure report', () => {
     (error) => error.code === 'ERR_CONTEXT_TOOL_PROTOCOL' && error.report.openai.orphanResults.length === 1
   );
 });
+
+
+test('OpenAI tool result before call is rejected', () => {
+  const report=protocol.validateToolProtocol([
+    {role:'tool',tool_call_id:'c1',content:'early'},
+    {role:'assistant',tool_calls:[{id:'c1',type:'function',function:{name:'x',arguments:'{}'}}]},
+  ]);
+  assert.equal(report.valid,false);
+  assert.equal(report.openai.orderViolations.length,1);
+});
+
+test('duplicate OpenAI tool call id is rejected', () => {
+  const report=protocol.validateToolProtocol([
+    {role:'assistant',tool_calls:[{id:'c1',type:'function',function:{name:'x',arguments:'{}'}}]},
+    {role:'tool',tool_call_id:'c1',content:'ok'},
+    {role:'assistant',tool_calls:[{id:'c1',type:'function',function:{name:'y',arguments:'{}'}}]},
+  ]);
+  assert.equal(report.valid,false);
+  assert.equal(report.openai.duplicateCallIds.length,1);
+});
+
+test('Anthropic tool result before tool_use is rejected', () => {
+  const report=protocol.validateToolProtocol([
+    {role:'user',content:[{type:'tool_result',tool_use_id:'t1',content:'early'}]},
+    {role:'assistant',content:[{type:'tool_use',id:'t1',name:'x',input:{}}]},
+  ]);
+  assert.equal(report.valid,false);
+  assert.equal(report.anthropic.orderViolations.length,1);
+});
+
+test('Gemini function response before call is rejected', () => {
+  const report=protocol.validateToolProtocol([
+    {role:'user',content:[{functionResponse:{name:'read_file',response:{result:'early'}}}]},
+    {role:'assistant',content:[{functionCall:{name:'read_file',args:{}}}]},
+  ]);
+  assert.equal(report.valid,false);
+  assert.equal(report.gemini.orderViolations.length,1);
+});
