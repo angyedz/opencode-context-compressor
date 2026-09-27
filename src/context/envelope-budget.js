@@ -62,7 +62,11 @@ function planInputEnvelope({
 function historyCharBudgetFromEnvelope(plan,{charsPerToken=3.2,minChars=800,maxChars=Infinity}={}){
   if(!plan?.bounded||plan.availableHistoryTokens===null||plan.availableHistoryTokens===undefined) return maxChars;
   if(plan.availableHistoryTokens<=0) return 0;
-  return Math.max(minChars,Math.min(maxChars,Math.floor(plan.availableHistoryTokens*charsPerToken)));
+  const raw=Math.max(0,Math.floor(plan.availableHistoryTokens*charsPerToken));
+  // Never exceed the actual envelope merely to satisfy a convenience minimum.
+  // minChars is advisory only when the envelope can afford it.
+  if(raw<minChars) return Math.min(maxChars,raw);
+  return Math.min(maxChars,raw);
 }
 
 function envelopeReport(plan){
