@@ -28,7 +28,7 @@ const { getDomainCert, getCA, CA_CERT_PATH } = require('./ca');
 const PORT = Number(process.env.PROXY_PORT || 3266);
 
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000 });
-const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000, rejectUnauthorized: false });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000, rejectUnauthorized: true });
 
 // ─── qwen-free-api fingerprint detection ────────────────────────────────────
 // Cache: 'host:port' → true (is qwen-free-api) | false
@@ -96,8 +96,18 @@ async function handleAiRequest(req, res, targetUrl, body) {
     return forwardRequest(req, res, body, targetUrl);
   }
 
+  const msgs = formats.extractMessages(parsed, format);
+  const explicitSessionId =
+    req.headers['x-session-id'] ||
+    req.headers['x-opencode-session'] ||
+    req.headers['x-opencode-session-id'] ||
+    null;
+  const sessionKey = memoStore.deriveSessionKey(msgs, {
+    sessionId: explicitSessionId,
+    provider: targetUrl.hostname || req.headers.host || 'provider',
+    model: parsed.model || '',
+  });
   const lastUserText = formats.getLastUserText(parsed, format);
-  const sessionKey = targetUrl.hostname || req.headers.host || 'default';
 
   // ── 1. Command interception: ALWAYS answered by compressor directly (0 LLM calls) ──
   if (commands.isCommandMessage([{ role: 'user', content: lastUserText }])) {
@@ -134,10 +144,9 @@ async function handleAiRequest(req, res, targetUrl, body) {
   }
 
   // ── 3. Normal request to external LLM: compress context → forward ──────
-  memoStore.syncMessages(sessionKey, formats.extractMessages(parsed, format));
+  memoStore.syncMessages(sessionKey, msgs);
   const disabled = commands.isCompressorDisabled(sessionKey);
   const maxChars = commands.getSessionLimit(sessionKey);
-  const msgs = formats.extractMessages(parsed, format);
   const compressed = compressor.compressMessages(msgs, { disabled, maxChars });
   const newBody = Buffer.from(JSON.stringify(formats.rebuildBody(parsed, compressed, format)));
 
@@ -171,7 +180,7 @@ function forwardRequest(req, res, body, targetUrl) {
       'content-length': bodyBuf.length,
     },
     agent: isHttps ? httpsAgent : httpAgent,
-    rejectUnauthorized: false,
+    rejectUnauthorized: isHttps ? true : undefined,
   };
 
   const proxyReq = lib.request(options, (proxyRes) => {
@@ -196,11 +205,13 @@ function forwardRequest(req, res, body, targetUrl) {
 
   proxyReq.setNoDelay(true);
 
-  // If client cancels generation, abort request to upstream provider immediately
-  req.on('close', () => {
-    if (!proxyReq.destroyed) {
-      proxyReq.destroy();
-    }
+  // Abort upstream only when the client actually aborts, not on normal request completion.
+  const abortUpstream = () => {
+    if (!proxyReq.destroyed) proxyReq.destroy();
+  };
+  req.on('aborted', abortUpstream);
+  res.on('close', () => {
+    if (!res.writableEnded) abortUpstream();
   });
 
   proxyReq.on('error', (err) => {
@@ -275,6 +286,8 @@ proxyServer.on('connect', (req, clientSocket, head) => {
       });
 
       innerHttp.emit('connection', mitmSocket);
+      // One ephemeral TLS listener per CONNECT tunnel; close the listener after accepting it.
+      mitmServer.close();
     }
   );
 
@@ -299,7 +312,7 @@ proxyServer.on('connect', (req, clientSocket, head) => {
 
 proxyServer.on('error', (err) => console.error('[proxy] server error:', err.message));
 
-proxyServer.listen(PORT, '0.0.0.0', () => {
+proxyServer.listen(PORT, '127.0.0.1', () => {
   const ca = getCA(); // ensure CA exists
   console.log(`⚡ context-compressor MITM Proxy running on http://127.0.0.1:${PORT}`);
   console.log(`🔐 Root CA certificate: ${CA_CERT_PATH}`);
