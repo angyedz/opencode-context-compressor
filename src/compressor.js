@@ -13,6 +13,7 @@ const analysisContext = require('./context/analysis-context');
 const provenance = require('./context/provenance');
 const envelopeBudget = require('./context/envelope-budget');
 const contradictionLedger = require('./context/contradiction-ledger');
+const taskStateGraph = require('./context/task-state-graph');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -471,7 +472,16 @@ function collectRankedAnchorRecords(turns, activeText = '', limit = 24) {
     topic: lifecycleTopic(entry.fact) || factTopicKey(entry.fact),
   }));
   const ledger = contradictionLedger.resolveRecords(ledgerInput);
-  const sorted = ledger.active.sort((a, b) => b.score - a.score || a.recency - b.recency);
+  const taskGraph = taskStateGraph.buildTaskStateGraph(ledger.active);
+  const taskFacts = new Set(
+    taskStateGraph
+      .selectTaskSubgraph(taskGraph, factEntities(activeText), { maxNodes: Math.min(limit, 12), maxDepth: 2 })
+      .map((node) => node.fact)
+  );
+  const sorted = ledger.active.sort((a, b) => {
+    const taskDelta = Number(taskFacts.has(b.fact)) - Number(taskFacts.has(a.fact));
+    return taskDelta || b.score - a.score || a.recency - b.recency;
+  });
   const diverse = [];
   const entityCounts = new Map();
   for (const entry of sorted) {
