@@ -23,6 +23,16 @@ function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, MAX_FACT_CHARS);
 }
 
+function looksSensitive(value) {
+  const text = String(value || '');
+  return [
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
+    /\b(?:api[_-]?key|secret|password|passwd|token)\s*[:=]\s*\S+/i,
+    /\b(?:sk|ghp|github_pat|xox[baprs])-[-_A-Za-z0-9]{16,}\b/,
+    /\bAKIA[0-9A-Z]{16}\b/,
+  ].some((pattern) => pattern.test(text));
+}
+
 function normalizeCategory(value) {
   const v = String(value || 'other').toLowerCase().trim();
   return ALLOWED_CATEGORIES.has(v) ? v : 'other';
@@ -66,6 +76,7 @@ class ProfileStore {
   remember(note, category = 'other') {
     const text = normalizeText(note);
     if (!text) return { saved: false, reason: 'empty' };
+    if (looksSensitive(text)) return { saved: false, reason: 'sensitive' };
 
     const normalized = text.toLowerCase();
     const existing = this._facts.find((f) => f.text.toLowerCase() === normalized);
@@ -148,3 +159,4 @@ class ProfileStore {
 
 module.exports = new ProfileStore();
 module.exports.PROFILE_FILE = PROFILE_FILE;
+module.exports.looksSensitive = looksSensitive;
