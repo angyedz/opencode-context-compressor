@@ -16,6 +16,7 @@ const {
   semanticFacts,
   collectRankedAnchors,
   scoreFact,
+  buildStateSnapshot,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -206,4 +207,15 @@ test('duplicate semantic anchors are collapsed before consuming summary budget',
   ]);
   const anchors = collectRankedAnchors(repeated, 'continue src/api/client.js', 24);
   assert.equal(anchors.filter((x) => x.includes('src/api/client.js')).length, 1);
+});
+
+
+test('working-state snapshot separates blockers, constraints and pending work', () => {
+  const turns = [[
+    { role: 'assistant', content: 'Error: refresh token regression failed. Decision: API contract must remain compatible. TODO add expiry regression test. Implemented src/auth/session.js.' },
+  ]];
+  const snapshot = buildStateSnapshot(turns, 'fix auth refresh regression');
+  assert.match(snapshot, /blockers:/);
+  assert.match(snapshot, /constraints:/);
+  assert.match(snapshot, /pending:/);
 });
