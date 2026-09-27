@@ -30,9 +30,11 @@ test('deterministic fuzz: compressor preserves active turn and never mutates inp
     const snapshot = JSON.stringify(messages);
     const budget = [4000, 8000, 16000, 32000][Math.floor(random() * 4)];
     const out = compressMessages(messages, { maxChars: budget });
+    const outAgain = compressMessages(messages, { maxChars: budget });
 
     assert.equal(JSON.stringify(messages), snapshot, `input mutated at seed ${seed}`);
     assert.equal(out[out.length - 1].content, active, `active turn changed at seed ${seed}`);
+    assert.deepEqual(outAgain, out, `non-deterministic output at seed ${seed}`);
     assert.ok(messagesSize(out) > 0);
   }
 });
