@@ -23,7 +23,7 @@
   "author": "angyedz",
   "license": "MIT",
   "dependencies": {
-    "node-forge": "^1.4.0"
+    "node-forge": "1.4.0"
   },
   "engines": {
     "node": ">=18"
