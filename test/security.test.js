@@ -26,3 +26,10 @@ test('root CA private key is created with restrictive permissions', () => {
   const ca = source('src/ca.js');
   assert.match(ca, /CA_KEY_PATH[\s\S]*mode:\s*0o600/);
 });
+
+
+test('installer does not claim Linux systemd startup on unsupported platforms', () => {
+  const cli = source('bin/cli.js');
+  assert.match(cli, /process\.platform !== 'linux'/);
+  assert.match(cli, /automatic daemon startup was not confirmed/);
+});
