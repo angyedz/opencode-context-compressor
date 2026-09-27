@@ -83,8 +83,8 @@ class SessionMemoStore {
   deriveSessionKey(rawMessages, metadata = {}) {
     if (metadata.sessionId) return `opencode:${String(metadata.sessionId).slice(0,160)}`;
     const firstUser = (Array.isArray(rawMessages) ? rawMessages : []).find((m) => m?.role === 'user' && messageToMemoText(m) && !isControlCommand(messageToMemoText(m)));
-    const seed = [metadata.provider || '', metadata.model || '', firstUser ? messageToMemoText(firstUser).slice(0,4000) : ''].join('\n');
-    if (!seed.trim()) return this.getActiveSessionKey() || 'default-active-session';
+    if (!firstUser) return this.getActiveSessionKey() || 'default-active-session';
+    const seed = messageToMemoText(firstUser).slice(0, 4000);
     return `session-${crypto.createHash('sha256').update(seed).digest('hex').slice(0,20)}`;
   }
   getActiveSessionKey() { return this._load().activeKey || null; }
