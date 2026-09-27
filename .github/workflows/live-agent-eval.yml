@@ -1,0 +1,64 @@
+name: Live Agent Eval
+
+on:
+  push:
+    branches: [fix/context-compressor-v2]
+    paths:
+      - '.github/workflows/live-agent-eval.yml'
+      - 'eval/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-agent-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover-opencode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install compressor dependencies
+        run: npm ci
+
+      - name: Run local regression suite
+        run: npm test
+
+      - name: Install OpenCode
+        run: npm install --global opencode-ai@latest
+
+      - name: Record OpenCode version and CLI
+        run: |
+          mkdir -p eval-artifacts
+          {
+            echo "## VERSION"
+            opencode --version || true
+            echo "## HELP"
+            opencode --help || true
+            echo "## RUN HELP"
+            opencode run --help || true
+            echo "## MODELS HELP"
+            opencode models --help || true
+            echo "## MODELS"
+            opencode models || true
+          } 2>&1 | tee eval-artifacts/opencode-discovery.txt
+
+      - name: Find Muse Spark model identifiers
+        run: |
+          grep -i -E 'muse|spark|1[.]3' eval-artifacts/opencode-discovery.txt | tee eval-artifacts/muse-models.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-agent-discovery
+          path: eval-artifacts/
+          retention-days: 7
