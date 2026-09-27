@@ -3,7 +3,7 @@
 /**
  * OpenCode Native Plugin & Hook Injection.
  * 
- * Injects context compression and persistent model-memo timeline memory
+ * Injects context compression and temporary session recall and minimal durable profile memory
  * directly into OpenCode's execution loop without passing through an external tunnel.
  */
 
@@ -29,7 +29,7 @@ function opencodeInjection(messages, options = {}) {
     };
   }
 
-  // 2. Sync history to persistent model-memo timeline store
+  // 2. Sync history to temporary active-session recall store
   memoStore.syncMessages(sessionKey, messages);
 
   // 3. Compress context if compaction is enabled
