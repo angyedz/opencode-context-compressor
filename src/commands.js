@@ -4,6 +4,7 @@ const { execFileSync } = require('child_process');
 const path = require('path');
 const memoStore = require('./memo-store');
 const profileStore = require('./profile-store');
+const diagnostics = require('./context/diagnostics');
 
 const disabledSessions = new Set();
 const sessionLimits = new Map();
@@ -112,6 +113,10 @@ function executeCommand(messages, sessionKey = 'default') {
     ].join('\n');
   }
 
+  if (cmd === 'explain' || cmd === 'diagnostics' || cmd === 'debug-context') {
+    return diagnostics.render(diagnostics.inspect(messages));
+  }
+
   if (cmd === 'history' || cmd === 'timeline') {
     return memoStore.recall(sessionKey, 'recent', 2400);
   }
@@ -179,6 +184,7 @@ function executeCommand(messages, sessionKey = 'default') {
     '- `$compressor status` — status and memory sizes',
     '- `$compressor limit 16k` — historical context budget',
     '- `$compressor off` / `on` — toggle compaction',
+    '- `$compressor explain` — explain current context size, graph and state without dumping message contents',
     '- `$history` — recent active-session timeline',
     '- `$search <query>` — recall exact details from the active session',
     '- `$memo clear` — clear temporary session memory',
