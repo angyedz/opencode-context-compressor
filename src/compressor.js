@@ -287,6 +287,7 @@ function semanticFacts(text) {
     'error', 'failed', 'exception', 'todo', 'fixme', 'decision', 'decided',
     'must', 'should', 'require', 'expects', 'expect', 'returns', 'return',
     'port', 'branch', 'commit', 'test', 'api', 'endpoint', 'schema', 'signature',
+    'tried', 'attempted', 'approach', 'workaround', 'did not work', "didn't work",
   ];
 
   const important = candidates.filter((line) => {
@@ -441,10 +442,11 @@ function collectHistoricalAnchors(turns, activeText = '') {
 
 function buildStateSnapshot(turns, activeText = '') {
   const anchors = collectRankedAnchors(turns, activeText, 18);
-  const buckets = { blockers: [], constraints: [], pending: [], implementation: [] };
+  const buckets = { blockers: [], failed_attempts: [], constraints: [], pending: [], implementation: [] };
   for (const fact of anchors) {
     const lower = fact.toLowerCase();
-    if (/\b(error|failed|exception|panic|regression|broken|failure|blocked)\b/.test(lower)) buckets.blockers.push(fact);
+    if (/\b(tried|attempted|approach|workaround)\b/.test(lower) && /\b(failed|did not work|didn't work|unsuccessful|broken)\b/.test(lower)) buckets.failed_attempts.push(fact);
+    else if (/\b(error|failed|exception|panic|regression|broken|failure|blocked)\b/.test(lower)) buckets.blockers.push(fact);
     else if (/\b(decision|must|require|required|contract|compatib|invariant|signature|schema)\b/.test(lower)) buckets.constraints.push(fact);
     else if (/\b(todo|fixme|next|remaining)\b/.test(lower)) buckets.pending.push(fact);
     else buckets.implementation.push(fact);
