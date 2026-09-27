@@ -687,7 +687,7 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
 
   let result = summary ? [summary, ...recentFlat] : [...recentFlat];
 
-  while (messagesSize(result) > maxChars && result.length > 1 && result[0]?.content?.startsWith?.('# Compacted prior conversation')) {
+  while (messagesSize(result) > maxChars && result.length > 1 && result[0]?.content?.startsWith?.('<compacted_history>')) {
     const summaryMsg = result[0];
     const over = messagesSize(result) - maxChars;
     const currentText = extractText(summaryMsg.content);
