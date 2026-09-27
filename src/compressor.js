@@ -679,6 +679,7 @@ function compressMessages(rawMessages, options = {}) {
   let maxChars = tokenBudget.deriveCharBudget({
     maxChars: options.maxChars,
     maxTokens: options.maxTokens,
+    tokenScale: options.tokenScale,
     defaultChars: MAX_HISTORY_CHARS,
     minChars: MIN_HISTORY_CHARS,
   });
