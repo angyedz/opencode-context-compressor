@@ -1,161 +1,65 @@
-# 🤖 AGENTS.md — AI Agent Installation & Operational Guide
+# AGENTS.md — opencode-context-compressor v2
 
-Instructions for AI agents (Antigravity, Cursor, OpenCode Agent, etc.) on how to install and manage **`opencode-context-compressor`**.
+Operational notes for coding agents working on this repository.
 
----
+## Architecture
 
-## Architecture Overview
+- `src/proxy.js` — loopback MITM proxy on `127.0.0.1:3266`.
+- `src/compressor.js` — turn-aware bounded historical context.
+- `src/memo-store.js` — temporary active-session exact recall; not long-term conversation memory.
+- `src/profile-store.js` — small durable profile facts only.
+- `src/mcp-server.js` — MCP tools for session recall and durable profile memory.
+- `src/formats/*` — provider adapters; structured tool/function blocks must round-trip without flattening.
 
-```
-opencode-cc (OpenCode + proxy env vars)
-         ↓
-  MITM Proxy :3266 (0.0.0.0:3266, HTTP + HTTPS MITM)
-         │
-         ├── 1. $compressor / $context-compressor in-chat commands?
-         │      → Intercepted FIRST (0ms, 0 LLM calls, 0 token cost)
-         │
-         ├── 2. Target is qwen-free-api (header X-Service: qwen-free-api)?
-         │      → Transparent forward without double-compression
-         │
-         └── 3. Target is external LLM (Anthropic, OpenAI, DeepSeek, Gemini)?
-                → Context compressed to active threshold (default 12k chars / configurable)
-                → Unbuffered real-time SSE streaming (TCP_NODELAY + flushHeaders)
-                → Output max_tokens guaranteed (prevents truncated responses)
-```
+## Non-negotiable invariants
 
----
+1. Never disable upstream TLS verification.
+2. Never bind the proxy to a non-loopback interface by default.
+3. Never persist full chat history as durable memory.
+4. Never split a live tool-call/tool-result chain during compaction.
+5. Never flatten Anthropic/Gemini structured blocks into plain text.
+6. The historical context budget must be enforced without truncating the current user turn.
+7. Durable profile memory must remain explicit and small.
 
-## Installation (Single Command)
+## Memory behavior
+
+`memo_recall` searches only the currently active conversation. Starting/switching conversations replaces the temporary timeline.
+
+`profile_remember` is for stable preferences, workflow conventions, environment facts, and durable project decisions. Do not store secrets, sensitive personal data, or transient chatter.
+
+## Commands
+
+- `$compressor status`
+- `$compressor limit 16k`
+- `$compressor off` / `$compressor on`
+- `$history`
+- `$search <query>`
+- `$memo clear`
+- `$remember [category] <fact>`
+- `$profile`
+- `$forget <query>`
+- `$reset`
+
+## Development
+
+Run:
 
 ```bash
-git clone https://github.com/angyedz/opencode-context-compressor.git
-cd opencode-context-compressor
 npm install
+npm test
+find src bin test -name '*.js' -print0 | xargs -0 -n1 node --check
+```
+
+CI runs the same checks on Node.js 18, 20, and 22.
+
+## Installation
+
+```bash
 node bin/cli.js install
 ```
 
-`node bin/cli.js install` automatically:
-1. Generates local Root CA cert at `~/.context-compressor/ca/ca.crt`
-2. Installs CA into system trust store (`update-ca-trust` / `update-ca-certificates`) and Chrome NSS
-3. Registers `model-memo` MCP server in `~/.config/opencode/opencode.json`
-4. Creates `opencode-cc` wrapper script at `~/.local/bin/opencode-cc`
-5. Enables and starts `context-compressor.service` via `systemctl --user`
+The installer generates a local CA, registers MCP, creates the wrapper and systemd user service, but does not modify the global system CA trust store by default.
 
----
+## Updating
 
-## Verification & Status
-
-```bash
-node bin/cli.js status
-# Or test via HTTP:
-curl -s http://127.0.0.1:3266/health
-```
-
----
-
-## Usage
-
-Launch OpenCode via the wrapper:
-
-```bash
-opencode-cc
-```
-
----
-
-## In-Chat Commands (Intercepted at Proxy Level, 0 LLM Cost)
-
-| Command | Action |
-|---|---|
-| `$compressor limit <N>` | Set session context threshold (e.g. `12k`, `32k`, `55000`). Default: `12000` chars (~3k tokens) |
-| `$compressor status` | View compaction status, active limit, and memory stats |
-| `$compressor off` / `on` | Disable or enable context compaction for current session |
-| `$history` | Show timeline of stored checkpoints for current session |
-| `$search <query>` | Search `model-memo` checkpoints |
-| `$memo clear` | Clear checkpoints for current session |
-| `$reset` | Reset session checkpoints |
-
----
-
-## Manual Installation (Fallback Steps)
-
-### 1. Start daemon to generate CA
-
-```bash
-node src/daemon.js &
-```
-
-### 2. Install Root CA into system trust store
-
-**Arch Linux / CachyOS:**
-```bash
-sudo cp ~/.context-compressor/ca/ca.crt /etc/ca-certificates/trust-source/anchors/context-compressor-ca.crt
-sudo trust extract-compat
-```
-
-**Ubuntu / Debian:**
-```bash
-sudo cp ~/.context-compressor/ca/ca.crt /usr/local/share/ca-certificates/context-compressor-ca.crt
-sudo update-ca-certificates
-```
-
-**Fedora / RHEL:**
-```bash
-sudo cp ~/.context-compressor/ca/ca.crt /etc/pki/ca-trust/source/anchors/context-compressor-ca.crt
-sudo update-ca-trust
-```
-
-### 3. Register MCP Server in `~/.config/opencode/opencode.json`
-
-```json
-{
-  "mcp": {
-    "model-memo": {
-      "type": "local",
-      "command": ["/usr/bin/node", "/absolute/path/to/opencode-context-compressor/src/mcp-server.js"],
-      "enabled": true
-    }
-  }
-}
-```
-
-### 4. Create Systemd User Service
-
-```bash
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/context-compressor.service << EOF
-[Unit]
-Description=OpenCode Context Compressor MITM Proxy & ModelMemo MCP
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/absolute/path/to/opencode-context-compressor
-ExecStart=/usr/bin/node /absolute/path/to/opencode-context-compressor/src/daemon.js
-Restart=always
-RestartSec=3
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=default.target
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable context-compressor.service
-systemctl --user start context-compressor.service
-```
-
----
-
-## Troubleshooting
-
-```bash
-# Check service logs
-journalctl --user -u context-compressor.service -n 30 --no-pager
-
-# Restart service
-systemctl --user restart context-compressor.service
-
-# Clean test memory store
-rm -f ~/.model-memo/memo.json
-```
+`$compressor update` performs a fetch + fast-forward-only merge from `origin/master`, refreshes dependencies, and restarts the service.
