@@ -3,6 +3,7 @@
 const tokenBudget = require('./token-budget');
 const semanticGraph = require('./semantic-graph');
 const stateEngine = require('./state-engine');
+const semanticIndex = require('./semantic-index');
 
 function safeText(content){
   if(typeof content==='string') return content;
@@ -30,6 +31,8 @@ function inspect(messages,{maxDepth=2}={}){
   const turns=splitTurns((messages||[]).filter(m=>m?.role!=='system'));
   const active=recentUser(messages);
   const graph=semanticGraph.buildDependencyGraph(turns);
+  const index=semanticIndex.buildSemanticIndex(turns);
+  const indexStats=semanticIndex.indexStats(index);
   const relevance=semanticGraph.explainRelevance(turns,active,maxDepth);
   const stats=semanticGraph.graphStats(graph);
   const tokens=tokenBudget.estimateMessagesTokens(messages);
@@ -47,6 +50,7 @@ function inspect(messages,{maxDepth=2}={}){
     chars,
     estimatedTokens:tokens,
     graph:stats,
+    index:indexStats,
     activeEntities:semanticGraph.factEntities(active),
     relevantEntities:relevance.slice(0,20),
     state:stateEngine.stateMetrics(facts),
@@ -61,6 +65,8 @@ function render(report){
     `- Serialized size: **${report.chars.toLocaleString()} chars**`,
     `- Estimated tokens: **~${report.estimatedTokens.toLocaleString()}**`,
     `- Dependency graph: **${report.graph.nodes} nodes / ${report.graph.edges} edges**`,
+    `- Semantic index: **${report.index.uniqueEntities} unique entities / ${report.index.structuredTurns} structured turns**`,
+    `- Average tool density: **${(report.index.averageToolDensity * 100).toFixed(1)}%**`,
     `- Active entities: ${report.activeEntities.length?report.activeEntities.join(', '):'none detected'}`,
     `- Relevant graph nodes: ${report.relevantEntities.length?report.relevantEntities.map(x=>`${x.entity}(d${x.depth})`).join(', '):'none'}`,
     `- State facts: blockers=${report.state.blockers||0}, constraints=${report.state.constraints||0}, pending=${report.state.pending||0}, failed_attempts=${report.state.failed_attempts||0}`,
