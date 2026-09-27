@@ -155,7 +155,7 @@ test('cold summaries retain implementation anchors needed by later coding turns'
 
   const out = compressMessages(messages, { maxChars: 7000 });
   const serialized = JSON.stringify(out);
-  assert.match(serialized, /src\\/auth\\/session\.js/);
+  assert.ok(serialized.includes('src/auth/session.js'));
   assert.match(serialized, /validateSession/);
   assert.match(serialized, /expired token accepted/);
   assert.match(serialized, /900 seconds/);
