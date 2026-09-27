@@ -62,6 +62,24 @@ function messageSize(message) {
   try { return JSON.stringify(message).length; } catch (_) { return extractText(message?.content).length; }
 }
 
+function estimateTokens(value) {
+  let text;
+  try { text = typeof value === 'string' ? value : JSON.stringify(value); } catch (_) { text = String(value || ''); }
+  if (!text) return 0;
+  let asciiWord = 0, cjk = 0, other = 0;
+  const words = text.match(/[A-Za-z0-9_]+|[^\x00-\x7F]|[^A-Za-z0-9_\s]/g) || [];
+  for (const token of words) {
+    if (/^[A-Za-z0-9_]+$/.test(token)) asciiWord += Math.max(1, Math.ceil(token.length / 4));
+    else if (/^[\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]$/.test(token)) cjk += 1;
+    else other += 1;
+  }
+  return asciiWord + cjk + other;
+}
+
+function messagesTokens(messages) {
+  return (messages || []).reduce((total, message) => total + estimateTokens(message) + 4, 0);
+}
+
 function messagesSize(messages) {
   return (messages || []).reduce((total, message) => total + messageSize(message), 0);
 }
@@ -716,6 +734,8 @@ module.exports = {
   extractText,
   replaceTextContent,
   messagesSize,
+  estimateTokens,
+  messagesTokens,
   semanticFacts,
   collectHistoricalAnchors,
   collectRankedAnchors,
