@@ -277,6 +277,27 @@ function anchorKey(fact) {
     .replace(/\s+/g, ' ');
 }
 
+function factEntities(text) {
+  const source = String(text || '');
+  const entities = new Set();
+  for (const match of source.matchAll(/(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]+)?/g)) entities.add(match[0].toLowerCase());
+  for (const match of source.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\([^)]{0,120}\)/g)) entities.add(match[0].replace(/\s+/g, '').toLowerCase());
+  for (const match of source.matchAll(/\/[A-Za-z0-9_./:{}-]{2,}/g)) entities.add(match[0].toLowerCase());
+  for (const match of source.matchAll(/\b(?:port|ttl|timeout|limit|budget|version)\s*(?:=|:|is|must be)?\s*\d+[A-Za-z]*\b/gi)) entities.add(match[0].toLowerCase());
+  return [...entities];
+}
+
+function factTopicKey(fact) {
+  const entities = factEntities(fact);
+  if (entities.length) return entities.slice(0, 3).join('|');
+  return anchorKey(fact)
+    .replace(/\b\d+(?:\.\d+)*\b/g, '<n>')
+    .replace(/\b(?:changed|updated|set|use|using|must|should|decision|decided)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+}
+
 function scoreFact(fact, activeText = '') {
   const text = normalizeAnchor(fact);
   const lower = text.toLowerCase();
@@ -291,6 +312,8 @@ function scoreFact(fact, activeText = '') {
   const activeTokens = new Set(String(activeText || '').toLowerCase().match(/[a-z0-9_./-]{4,}/g) || []);
   const factTokens = lower.match(/[a-z0-9_./-]{4,}/g) || [];
   for (const token of factTokens) if (activeTokens.has(token)) score += 3;
+  const activeEntities = new Set(factEntities(activeText));
+  for (const entity of factEntities(text)) if (activeEntities.has(entity)) score += 8;
   return score;
 }
 
@@ -311,7 +334,13 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
       }
     }
   }
-  return [...best.values()]
+  const ranked = [...best.values()].sort((a, b) => a.recency - b.recency || b.score - a.score);
+  const newestByTopic = new Map();
+  for (const entry of ranked) {
+    const topic = factTopicKey(entry.fact);
+    if (!newestByTopic.has(topic)) newestByTopic.set(topic, entry);
+  }
+  return [...newestByTopic.values()]
     .sort((a, b) => b.score - a.score || a.recency - b.recency)
     .slice(0, limit)
     .map((entry) => entry.fact);
@@ -582,6 +611,8 @@ module.exports = {
   collectRankedAnchors,
   scoreFact,
   buildStateSnapshot,
+  factEntities,
+  factTopicKey,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
