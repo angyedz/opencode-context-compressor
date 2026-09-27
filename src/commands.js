@@ -6,6 +6,7 @@ const memoStore = require('./memo-store');
 const profileStore = require('./profile-store');
 const diagnostics = require('./context/diagnostics');
 const runtimeMetrics = require('./context/runtime-metrics');
+const runtimeMetrics = require('./context/runtime-metrics');
 const compressor = require('./compressor');
 const selectionExplain = require('./context/selection-explain');
 
@@ -150,6 +151,8 @@ function executeCommand(messages, sessionKey = 'default') {
   if (cmd === 'status') {
     const stats = memoStore.stats();
     const profile = profileStore.stats();
+    const runtime = runtimeMetrics.get(sessionKey);
+    const aggregate = runtimeMetrics.aggregate();
     const last = runtimeMetrics.get(sessionKey);
     return [
       '⚡ **Context Compressor Status**',
@@ -159,6 +162,9 @@ function executeCommand(messages, sessionKey = 'default') {
       `- Input window / output reserve: **${getSessionInputLimit(sessionKey)?.toLocaleString() || 'provider/default'} / ${getSessionOutputReserve(sessionKey).toLocaleString()} tokens**`,
       `- Active-session memory: **${stats.entries} items across ${stats.sessions} session(s)** (temporary, non-persistent)`,
       `- Durable profile memory: **${profile.facts} facts**`,
+      runtime ? `- Last compression: **~${runtime.before.tokens.toLocaleString()} → ~${runtime.after.tokens.toLocaleString()} tokens** (${runtime.savings.tokenPercent.toFixed(1)}% estimated savings)` : '- Last compression: no runtime sample yet',
+      runtime ? `- Last quality score: **${runtime.quality.score}/100**, protocol=${runtime.quality.protocolValid ? 'valid' : 'INVALID'}` : '',
+      `- Runtime aggregate: **~${aggregate.savedTokens.toLocaleString()} estimated tokens saved** across ${aggregate.sessions} active session metric(s)`,
       ...(last ? [
         `- Last compression: **${last.before.tokens.toLocaleString()} → ${last.after.tokens.toLocaleString()} est. tokens** (${last.savings.tokenPercent.toFixed(1)}% saved, ${last.savings.ratio.toFixed(2)}× smaller)`,
         `- Last quality score: **${last.quality.score}/100**; protocol=${last.quality.protocolValid ? 'valid' : 'INVALID'}`,
