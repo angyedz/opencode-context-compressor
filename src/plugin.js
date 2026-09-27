@@ -18,7 +18,7 @@ function compressAndRecord(messages, sessionKey, options = {}) {
   const maxChars = options.maxChars || commands.getSessionLimit(sessionKey);
   const compressed = compressor.compressMessages(messages, { ...options, disabled, maxChars });
   const report = compressionReport.publicReport(
-    compressionReport.buildCompressionReport(messages, compressed, { maxChars, maxTokens: options.maxTokens })
+    compressionReport.buildCompressionReport(messages, compressed, { maxChars, maxTokens: options.maxTokens, maxInputTokens: options.maxInputTokens, reserveOutputTokens: options.reserveOutputTokens })
   );
   runtimeMetrics.touch(sessionKey, report);
   return compressed;
