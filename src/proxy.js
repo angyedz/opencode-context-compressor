@@ -25,7 +25,7 @@ const commands = require('./commands');
 const memoStore = require('./memo-store');
 const { getDomainCert, getCA, CA_CERT_PATH } = require('./ca');
 
-const PORT = Number(process.env.PROXY_PORT || 3266);
+const PORT = process.env.PROXY_PORT === '0' ? 0 : Number(process.env.PROXY_PORT || 3266);
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 64 * 1024 * 1024);
 
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, timeout: 60000 });
@@ -269,7 +269,7 @@ const proxyServer = http.createServer(async (req, res) => {
   // Health check
   if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, service: 'context-compressor-proxy', port: PORT, ca: CA_CERT_PATH }));
+    return res.end(JSON.stringify({ ok: true, service: 'context-compressor-proxy', port: proxyServer.address()?.port || PORT, ca: CA_CERT_PATH }));
   }
 
   let body;
@@ -362,7 +362,7 @@ proxyServer.on('error', (err) => console.error('[proxy] server error:', err.mess
 
 proxyServer.listen(PORT, '127.0.0.1', () => {
   const ca = getCA(); // ensure CA exists
-  console.log(`⚡ context-compressor MITM Proxy running on http://127.0.0.1:${PORT}`);
+  console.log(`⚡ context-compressor MITM Proxy running on http://127.0.0.1:${proxyServer.address().port}`);
   console.log(`🔐 Root CA certificate: ${CA_CERT_PATH}`);
   console.log(`   Install CA to trust HTTPS interception (see: node bin/cli.js install)`);
 });
