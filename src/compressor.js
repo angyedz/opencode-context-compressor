@@ -600,17 +600,22 @@ function recentBudgetRatio(turns, maxChars) {
 function rescueRelevantTurns(turns, activeText, budget) {
   const activeEntities = new Set(factEntities(activeText));
   if (!activeEntities.size || budget < 400) return [];
+  const dependencyMap = dependencyDistances(buildDependencyGraph(turns), activeText, 1);
   const candidates = [];
   for (let i = 0; i < (turns || []).length; i += 1) {
     const turn = turns[i];
     const text = turn.map((m) => extractText(m.content)).join('\n');
-    const overlap = factEntities(text).filter((e) => activeEntities.has(e)).length;
-    if (!overlap) continue;
+    let relevance = 0;
+    for (const entity of factEntities(text)) {
+      if (activeEntities.has(entity)) relevance += 4;
+      else if (dependencyMap.get(entity) === 1) relevance += 2;
+    }
+    if (!relevance) continue;
     const size = messagesSize(turn);
     if (size > Math.min(3200, budget)) continue;
-    candidates.push({ turn, overlap, i, size });
+    candidates.push({ turn, relevance, i, size });
   }
-  candidates.sort((a,b)=>b.overlap-a.overlap || b.i-a.i);
+  candidates.sort((a,b)=>b.relevance-a.relevance || b.i-a.i);
   const selected=[]; let used=0;
   for(const c of candidates){ if(used+c.size>budget) continue; selected.push(c.turn); used+=c.size; if(selected.length>=2) break; }
   return selected;
