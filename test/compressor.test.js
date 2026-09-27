@@ -307,3 +307,14 @@ test('repeated tool outputs collapse while the newest equivalent result remains 
   assert.ok(toolTexts.some(x=>x.includes('latest equivalent result retained')));
   assert.equal(stableTextFingerprint('12:30:01 PASS in 1.2s'), stableTextFingerprint('12:30:09 PASS in 9.8s'));
 });
+
+
+test('working state preserves failed approaches so the agent does not loop', () => {
+  const turns=[
+    [{role:'assistant',content:'Attempted workaround: disable TLS verification in src/net/client.js. It failed and did not work.'}],
+    [{role:'assistant',content:'TODO find a safe certificate-chain fix for src/net/client.js.'}],
+  ];
+  const snapshot=buildStateSnapshot(turns,'fix src/net/client.js TLS');
+  assert.match(snapshot,/failed_attempts:/);
+  assert.match(snapshot,/disable TLS verification/i);
+});
