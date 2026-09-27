@@ -15,7 +15,7 @@ const commands = require('./commands');
  * Core Message Injection & Command Interceptor
  */
 function opencodeInjection(messages, options = {}) {
-  const sessionKey = options.sessionKey || options.sessionId || 'default-opencode-session';
+  const sessionKey = options.sessionKey || options.sessionId || memoStore.deriveSessionKey(messages, { provider: 'opencode', model: options.model || '' });
 
   // 1. Intercept in-chat commands ($context-compressor off, $memo, $help)
   if (commands.isCommandMessage(messages)) {
@@ -48,16 +48,16 @@ function opencodeInjection(messages, options = {}) {
 function OpenCodePlugin(opencode) {
   return {
     'chat.transformMessages': ({ messages, session }) => {
-      const sessionKey = session?.id || 'default-opencode-session';
+      const sessionKey = session?.id || memoStore.deriveSessionKey(messages, { provider: 'opencode' });
       memoStore.syncMessages(sessionKey, messages);
       const disabled = commands.isCompressorDisabled(sessionKey);
-      return compressor.compressMessages(messages, { disabled });
+      return compressor.compressMessages(messages, { disabled, maxChars: commands.getSessionLimit(sessionKey) });
     },
     'experimental.chat.transformMessages': ({ messages, session }) => {
-      const sessionKey = session?.id || 'default-opencode-session';
+      const sessionKey = session?.id || memoStore.deriveSessionKey(messages, { provider: 'opencode' });
       memoStore.syncMessages(sessionKey, messages);
       const disabled = commands.isCompressorDisabled(sessionKey);
-      return compressor.compressMessages(messages, { disabled });
+      return compressor.compressMessages(messages, { disabled, maxChars: commands.getSessionLimit(sessionKey) });
     },
   };
 }
