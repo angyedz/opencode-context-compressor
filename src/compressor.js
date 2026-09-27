@@ -14,6 +14,7 @@ const provenance = require('./context/provenance');
 const envelopeBudget = require('./context/envelope-budget');
 const contradictionLedger = require('./context/contradiction-ledger');
 const taskStateGraph = require('./context/task-state-graph');
+const summaryPacker = require('./context/summary-packer');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -708,15 +709,14 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
 
     if (textBudget > 240) {
       const anchors = collectHistoricalAnchors(older, activeText);
-      const anchorText = anchors.length
-        ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
-        : '';
-      const anchorBudget = Math.min(anchorText.length, Math.floor(textBudget * 0.62));
-      const keptAnchors = anchorText.slice(0, anchorBudget);
-      const remaining = Math.max(0, textBudget - keptAnchors.length);
-      const tail = remaining > 0 ? summaryText.slice(-remaining) : '';
-      summaryText = `${keptAnchors}${tail}`;
-      summary = makeHistorySummary(summaryText);
+      const stateText = buildStateSnapshot(older, activeText);
+      const excerpts = [];
+      for (const turn of older) {
+        const parts = turn.map(summarizeMessage).filter(Boolean);
+        if (parts.length) excerpts.push(parts.join(' | '));
+      }
+      summaryText = summaryPacker.packSummary({ stateText, anchors, excerpts }, textBudget);
+      summary = summaryText ? makeHistorySummary(summaryText) : null;
     } else {
       summary = null;
     }
