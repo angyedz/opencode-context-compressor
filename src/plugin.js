@@ -10,6 +10,8 @@
 const compressor = require('./compressor');
 const memoStore = require('./memo-store');
 const commands = require('./commands');
+const compressionReport = require('./context/compression-report');
+const runtimeMetrics = require('./context/runtime-metrics');
 
 /**
  * Core Message Injection & Command Interceptor
@@ -34,7 +36,9 @@ function opencodeInjection(messages, options = {}) {
 
   // 2. Compress context if compaction is enabled
   const disabled = commands.isCompressorDisabled(sessionKey) || options.compressorDisabled === true;
-  const compressed = compressor.compressMessages(messages, { ...options, disabled, maxChars: options.maxChars || commands.getSessionLimit(sessionKey) });
+  const maxChars = options.maxChars || commands.getSessionLimit(sessionKey);
+  const compressed = compressor.compressMessages(messages, { ...options, disabled, maxChars });
+  runtimeMetrics.touch(sessionKey, compressionReport.publicReport(compressionReport.buildCompressionReport(messages, compressed, { maxChars, maxTokens: options.maxTokens })));
 
   return {
     intercepted: false,
@@ -51,7 +55,10 @@ function OpenCodePlugin(opencode) {
       const sessionKey = session?.id || memoStore.deriveSessionKey(messages, { provider: 'opencode' });
       memoStore.syncMessages(sessionKey, messages);
       const disabled = commands.isCompressorDisabled(sessionKey);
-      return compressor.compressMessages(messages, { disabled, maxChars: commands.getSessionLimit(sessionKey) });
+      const maxChars = commands.getSessionLimit(sessionKey);
+      const compressed = compressor.compressMessages(messages, { disabled, maxChars });
+      runtimeMetrics.touch(sessionKey, compressionReport.publicReport(compressionReport.buildCompressionReport(messages, compressed, { maxChars })));
+      return compressed;
     },
     'experimental.chat.transformMessages': ({ messages, session }) => {
       const sessionKey = session?.id || memoStore.deriveSessionKey(messages, { provider: 'opencode' });
