@@ -707,7 +707,9 @@ function compressMessages(rawMessages, options = {}) {
   const cleaned = stripCommands(rawMessages);
   if (!cleaned.length) return [];
 
-  const maxChars = Math.max(MIN_HISTORY_CHARS, Number(options.maxChars) || MAX_HISTORY_CHARS);
+  const requestedTokens = Number(options.maxTokens);
+  const tokenDerivedChars = Number.isFinite(requestedTokens) && requestedTokens > 0 ? Math.floor(requestedTokens * 3.2) : Infinity;
+  const maxChars = Math.max(MIN_HISTORY_CHARS, Math.min(Number(options.maxChars) || MAX_HISTORY_CHARS, tokenDerivedChars));
   const system = cleaned.filter((message) => message?.role === 'system');
   const conversation = cleaned.filter((message) => message?.role !== 'system');
 
