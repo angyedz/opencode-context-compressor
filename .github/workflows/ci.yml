@@ -33,6 +33,8 @@ jobs:
         run: node test/syntax-check.js
 
       - name: Test
+        env:
+          CONTEXT_COMPRESSOR_PORT: 0
         run: npm test
 
       - name: Benchmark smoke test
