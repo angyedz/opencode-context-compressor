@@ -9,6 +9,9 @@ const runtimeMetrics = require('./context/runtime-metrics');
 
 const disabledSessions = new Set();
 const sessionLimits = new Map();
+const sessionTokenLimits = new Map();
+const sessionInputLimits = new Map();
+const sessionOutputReserves = new Map();
 
 const COMMAND_RE = /^(?:\$|\/)(?:context-compressor|compressor|model-memo|memo|history|search|remember|forget|profile|reset|help)\b/i;
 
@@ -55,6 +58,18 @@ function getSessionLimit(sessionKey) {
   return sessionLimits.get(sessionKey) || 16000;
 }
 
+function getSessionTokenLimit(sessionKey) {
+  return sessionTokenLimits.get(sessionKey) || null;
+}
+
+function getSessionInputLimit(sessionKey) {
+  return sessionInputLimits.get(sessionKey) || null;
+}
+
+function getSessionOutputReserve(sessionKey) {
+  return sessionOutputReserves.get(sessionKey) || 4096;
+}
+
 function parseCommand(rawText) {
   const normalized = String(rawText || '').trim().replace(/^[/$]/, '');
   const parts = normalized.split(/\s+/).filter(Boolean);
@@ -91,6 +106,35 @@ function executeCommand(messages, sessionKey = 'default') {
     return `⚡ Current historical context budget: **${current.toLocaleString()} chars**. Usage: \`$compressor limit 16k\`.`;
   }
 
+  if (cmd === 'tokens' || cmd === 'token-limit') {
+    const value = parseLimit(args[0]);
+    if (value && value >= 256 && value <= 500000) {
+      sessionTokenLimits.set(sessionKey, value);
+      return `⚡ Historical token budget set to **${value.toLocaleString()} estimated tokens** for this session.`;
+    }
+    const current = getSessionTokenLimit(sessionKey);
+    return `⚡ Historical token budget: **${current ? current.toLocaleString() : 'auto'}**. Usage: \`$compressor tokens 8k\`.`;
+  }
+
+  if (cmd === 'window' || cmd === 'input-window' || cmd === 'input') {
+    const value = parseLimit(args[0]);
+    if (value && value >= 1000 && value <= 2000000) {
+      sessionInputLimits.set(sessionKey, value);
+      return `⚡ Total input window set to **${value.toLocaleString()} tokens** for this session.`;
+    }
+    const current = getSessionInputLimit(sessionKey);
+    return `⚡ Total input window: **${current ? current.toLocaleString() : 'provider/default'}**. Usage: \`$compressor window 64k\`.`;
+  }
+
+  if (cmd === 'reserve' || cmd === 'output-reserve') {
+    const value = parseLimit(args[0]);
+    if (value && value >= 256 && value <= 500000) {
+      sessionOutputReserves.set(sessionKey, value);
+      return `⚡ Output reserve set to **${value.toLocaleString()} tokens** for this session.`;
+    }
+    return `⚡ Output reserve: **${getSessionOutputReserve(sessionKey).toLocaleString()} tokens**. Usage: \`$compressor reserve 8k\`.`;
+  }
+
   if (['off', 'disable'].includes(cmd)) {
     disabledSessions.add(sessionKey);
     return '⚡ Context compaction is **DISABLED** for this session.';
@@ -109,7 +153,8 @@ function executeCommand(messages, sessionKey = 'default') {
       '⚡ **Context Compressor Status**',
       '',
       `- Compaction: ${disabledSessions.has(sessionKey) ? '🔴 disabled' : '🟢 enabled'}`,
-      `- Historical budget: **${getSessionLimit(sessionKey).toLocaleString()} chars**`,
+      `- Historical budget: **${getSessionLimit(sessionKey).toLocaleString()} chars** / **${getSessionTokenLimit(sessionKey)?.toLocaleString() || 'auto'} est. tokens**`,
+      `- Input window / output reserve: **${getSessionInputLimit(sessionKey)?.toLocaleString() || 'provider/default'} / ${getSessionOutputReserve(sessionKey).toLocaleString()} tokens**`,
       `- Active-session memory: **${stats.entries} items across ${stats.sessions} session(s)** (temporary, non-persistent)`,
       `- Durable profile memory: **${profile.facts} facts**`,
       ...(last ? [
@@ -184,6 +229,9 @@ function executeCommand(messages, sessionKey = 'default') {
     memoStore.clear(sessionKey);
     disabledSessions.delete(sessionKey);
     sessionLimits.delete(sessionKey);
+    sessionTokenLimits.delete(sessionKey);
+    sessionInputLimits.delete(sessionKey);
+    sessionOutputReserves.delete(sessionKey);
     return '🔄 Reset temporary state for the active session. Durable profile preferences were kept.';
   }
 
@@ -199,7 +247,10 @@ function executeCommand(messages, sessionKey = 'default') {
     '🛠️ **Context Compressor Commands**',
     '',
     '- `$compressor status` — status and memory sizes',
-    '- `$compressor limit 16k` — historical context budget',
+    '- `$compressor limit 16k` — historical character budget',
+    '- `$compressor tokens 8k` — historical estimated-token budget',
+    '- `$compressor window 64k` — total input token window',
+    '- `$compressor reserve 8k` — reserve tokens for model output',
     '- `$compressor off` / `on` — toggle compaction',
     '- `$compressor explain` — explain current context size, graph and state without dumping message contents',
     '- `$history` — recent active-session timeline',
@@ -218,6 +269,9 @@ module.exports = {
   isCommandMessage,
   isCompressorDisabled,
   getSessionLimit,
+  getSessionTokenLimit,
+  getSessionInputLimit,
+  getSessionOutputReserve,
   executeCommand,
   parseCommand,
   parseLimit,
