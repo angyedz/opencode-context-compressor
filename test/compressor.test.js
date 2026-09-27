@@ -19,6 +19,7 @@ const {
   buildStateSnapshot,
   factEntities,
   recentBudgetRatio,
+  lifecycleState,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -255,4 +256,25 @@ test('adaptive hot window spends less exact budget on giant tool logs and more o
     { role:'tool', tool_call_id:'x'+i, content:'log '.repeat(4000) },
   ]);
   assert.ok(recentBudgetRatio(concise, 16000) > recentBudgetRatio(noisy, 16000));
+});
+
+
+test('resolved failures do not survive forever as active blockers', () => {
+  const turns = [
+    [{ role:'assistant', content:'Error: src/auth/session.js refresh regression failed.' }],
+    [{ role:'assistant', content:'Fixed src/auth/session.js refresh regression. Tests passed.' }],
+  ];
+  const anchors=collectRankedAnchors(turns,'continue src/auth/session.js',20).join('\n');
+  assert.match(anchors,/passed|Fixed/i);
+  assert.doesNotMatch(anchors,/Error:.*failed/i);
+  assert.equal(lifecycleState('Tests passed after fix'),'resolved');
+});
+
+test('completed TODO is suppressed from pending historical state', () => {
+  const turns = [
+    [{ role:'assistant', content:'TODO: add regression test for src/cache/store.js.' }],
+    [{ role:'assistant', content:'Completed regression test for src/cache/store.js. Tests passed.' }],
+  ];
+  const snapshot=buildStateSnapshot(turns,'continue src/cache/store.js');
+  assert.doesNotMatch(snapshot,/pending:.*TODO/i);
 });
