@@ -431,7 +431,7 @@ function lifecycleTopic(fact) {
     .replace(/\s+/g, ' '));
 }
 
-function collectRankedAnchors(turns, activeText = '', limit = 24) {
+function collectRankedAnchorRecords(turns, activeText = '', limit = 24) {
   const best = new Map();
   const dependencyMap = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 2);
   let recency = 0;
@@ -447,18 +447,27 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
           dependencyDistances: dependencyMap,
           recency,
         });
-        const value = { fact, score: scored.score, reasons: scored.reasons, recency };
+        const value = {
+          fact,
+          score: scored.score,
+          reasons: scored.reasons,
+          recency,
+          sourceRole: message?.role || 'unknown',
+          entities: factEntities(fact),
+        };
         const old = best.get(key);
         if (!old || value.score > old.score || value.recency < old.recency) best.set(key, value);
       }
     }
   }
+
   const ranked = [...best.values()].sort((a, b) => a.recency - b.recency || b.score - a.score);
   const newestByTopic = new Map();
   for (const entry of ranked) {
     const topic = factTopicKey(entry.fact);
     if (!newestByTopic.has(topic)) newestByTopic.set(topic, entry);
   }
+
   const resolvedTopics = new Set();
   const lifecycleFiltered = [];
   const byRecency = [...newestByTopic.values()].sort((a, b) => a.recency - b.recency);
@@ -467,20 +476,25 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
     const topic = lifecycleTopic(entry.fact);
     if (state === 'resolved') resolvedTopics.add(topic);
     if (state === 'open' && resolvedTopics.has(topic)) continue;
-    lifecycleFiltered.push(entry);
+    lifecycleFiltered.push({ ...entry, lifecycle: state, topic });
   }
+
   const sorted = lifecycleFiltered.sort((a, b) => b.score - a.score || a.recency - b.recency);
   const diverse = [];
   const entityCounts = new Map();
   for (const entry of sorted) {
-    const primary = factEntities(entry.fact)[0] || factTopicKey(entry.fact);
+    const primary = entry.entities[0] || entry.topic || factTopicKey(entry.fact);
     const count = entityCounts.get(primary) || 0;
     if (count >= 3 && diverse.length >= Math.min(8, limit)) continue;
     diverse.push(entry);
     entityCounts.set(primary, count + 1);
     if (diverse.length >= limit) break;
   }
-  return diverse.map((entry) => entry.fact);
+  return diverse;
+}
+
+function collectRankedAnchors(turns, activeText = '', limit = 24) {
+  return collectRankedAnchorRecords(turns, activeText, limit).map((entry) => entry.fact);
 }
 
 function summarizeMessage(message) {
@@ -828,6 +842,7 @@ module.exports = {
   semanticFacts,
   collectHistoricalAnchors,
   collectRankedAnchors,
+  collectRankedAnchorRecords,
   scoreFact,
   buildStateSnapshot,
   factEntities,
