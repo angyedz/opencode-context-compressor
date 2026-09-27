@@ -237,9 +237,19 @@ function transformMessage(message, age) {
   return { ...message, content: replaceTextContent(message.content, next) };
 }
 
+function semanticFacts(text) {
+  const source = String(text || '');
+  const candidates = source.split(/\n|(?<=[.!?])\s+/).map((line) => line.trim()).filter(Boolean);
+  const important = candidates.filter((line) =>
+    /(?:[\\/][\\w.-]+\\.[a-z0-9]+\\b|\\b[a-zA-Z_$][\\w$]*\\([^)]{0,120}\\)|\\b(?:error|failed|exception|todo|fixme|decision|decided|must|should|require|expects?|returns?|port|branch|commit|test|api|endpoint|schema|signature)\\b)/i.test(line)
+  );
+  return [...new Set(important)].slice(0, 5).join(' | ').slice(0, 700);
+}
+
 function summarizeMessage(message) {
   const role = String(message?.role || 'message').toUpperCase();
   let text = extractText(message?.content).replace(/\s+/g, ' ').trim();
+  const facts = semanticFacts(extractText(message?.content));
 
   const toolNames = [];
   if (Array.isArray(message?.tool_calls)) {
@@ -255,7 +265,8 @@ function summarizeMessage(message) {
   }
 
   if (!text) return `[${role}] structured/tool event retained in active-session memory`;
-  return `[${role}] ${text.slice(0, 420)}`;
+  const excerpt = text.slice(0, 360);
+  return `[${role}] ${excerpt}${facts && !excerpt.includes(facts) ? ` | KEY: ${facts}` : ''}`;
 }
 
 function summarizeTurns(turns) {
@@ -453,6 +464,7 @@ module.exports = {
   extractText,
   replaceTextContent,
   messagesSize,
+  semanticFacts,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
