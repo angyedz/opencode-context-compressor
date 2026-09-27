@@ -273,6 +273,22 @@ function summarizeMessage(message) {
   return `[${role}] ${excerpt}${facts && !excerpt.includes(facts) ? ` | KEY: ${facts}` : ''}`;
 }
 
+function collectHistoricalAnchors(turns) {
+  const anchors = [];
+  for (const turn of turns || []) {
+    for (const message of turn) {
+      const facts = semanticFacts(extractText(message?.content));
+      if (!facts) continue;
+      for (const fact of facts.split(' | ')) {
+        const normalized = fact.trim();
+        if (normalized && !anchors.includes(normalized)) anchors.push(normalized);
+        if (anchors.length >= 24) return anchors;
+      }
+    }
+  }
+  return anchors;
+}
+
 function summarizeTurns(turns) {
   const lines = [];
   let number = 1;
@@ -285,7 +301,12 @@ function summarizeTurns(turns) {
     }
   }
 
-  return lines.join('\n');
+  const anchors = collectHistoricalAnchors(turns);
+  const anchorBlock = anchors.length
+    ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
+    : '';
+
+  return `${anchorBlock}### Turn excerpts\n${lines.join('\n')}`;
 }
 
 function makeHistorySummary(text) {
@@ -352,8 +373,21 @@ function boundRecentHistory(turns, maxChars) {
   if (summary && messageSize(summary) > available) {
     const overhead = messageSize(makeHistorySummary(''));
     const textBudget = Math.max(0, available - overhead - 32);
-    summaryText = summaryText.slice(-textBudget);
-    summary = textBudget > 120 ? makeHistorySummary(summaryText) : null;
+
+    if (textBudget > 240) {
+      const anchors = collectHistoricalAnchors(older);
+      const anchorText = anchors.length
+        ? `### Key historical anchors\n${anchors.map((anchor) => `- ${anchor}`).join('\n')}\n\n`
+        : '';
+      const anchorBudget = Math.min(anchorText.length, Math.floor(textBudget * 0.62));
+      const keptAnchors = anchorText.slice(0, anchorBudget);
+      const remaining = Math.max(0, textBudget - keptAnchors.length);
+      const tail = remaining > 0 ? summaryText.slice(-remaining) : '';
+      summaryText = `${keptAnchors}${tail}`;
+      summary = makeHistorySummary(summaryText);
+    } else {
+      summary = null;
+    }
   }
 
   let result = summary ? [summary, ...recentFlat] : [...recentFlat];
@@ -469,6 +503,7 @@ module.exports = {
   replaceTextContent,
   messagesSize,
   semanticFacts,
+  collectHistoricalAnchors,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
