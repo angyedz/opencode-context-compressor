@@ -338,6 +338,8 @@ function factEntities(text) {
   for (const match of source.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\([^)]{0,120}\)/g)) entities.add(match[0].replace(/\s+/g, '').toLowerCase());
   for (const match of source.matchAll(/\/[A-Za-z0-9_./:{}-]{2,}/g)) entities.add(match[0].toLowerCase());
   for (const match of source.matchAll(/\b(?:port|ttl|timeout|limit|budget|version)\s*(?:=|:|is|must be)?\s*\d+[A-Za-z]*\b/gi)) entities.add(match[0].toLowerCase());
+  for (const match of source.matchAll(/\b(?:ERR_[A-Z0-9_]+|E[A-Z]{3,}[A-Z0-9_]*|[A-Za-z]+Error)\b/g)) entities.add(match[0].toLowerCase());
+  for (const match of source.matchAll(/\b(?:test|spec)[:#._-][A-Za-z0-9_.:/-]+\b/gi)) entities.add(match[0].toLowerCase());
   return [...entities];
 }
 
