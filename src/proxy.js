@@ -152,7 +152,7 @@ async function handleAiRequest(req, res, targetUrl, body) {
       [{ role: 'user', content: lastUserText }],
       sessionKey
     );
-    const isStream = Boolean(parsed.stream);
+    const isStream = Boolean(parsed.stream) || pathname.includes('streamGenerateContent');
 
     if (isStream) {
       res.writeHead(200, {
