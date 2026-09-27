@@ -4,6 +4,7 @@ const tokenBudget=require('./token-budget');
 const quality=require('./quality-gates');
 const graph=require('./semantic-graph');
 const envelopeBudget=require('./envelope-budget');
+const provenance=require('./provenance-ledger');
 
 function splitTurns(messages){
   const turns=[];let current=[];
@@ -27,6 +28,8 @@ function buildCompressionReport(input,output,{maxChars=null,maxTokens=null,maxIn
   const turns=splitTurns(output);
   const g=graph.graphStats(graph.buildDependencyGraph(turns));
   const inputTurns=splitTurns(input);
+  const provenanceBefore=provenance.buildLedger(input);
+  const provenanceAfter=provenance.buildLedger(output);
   const activeTurn=inputTurns.length?inputTurns[inputTurns.length-1]:[];
   const envelope=envelopeBudget.planInputEnvelope({
     maxInputTokens,
@@ -47,6 +50,7 @@ function buildCompressionReport(input,output,{maxChars=null,maxTokens=null,maxIn
     },
     quality:{score:q.score,...q.checks},
     graph:g,
+    provenance:{...provenance.diffLedgers(provenanceBefore,provenanceAfter),currentUserExact:provenance.verifyCurrentUser(input,output)},
     limits:{maxChars,maxTokens,maxInputTokens,reserveOutputTokens},
     envelope,
     generatedAt:Date.now(),
@@ -61,6 +65,7 @@ function publicReport(report){
     savings:report.savings,
     quality:report.quality,
     graph:report.graph,
+    provenance:report.provenance,
     limits:report.limits,
     envelope:report.envelope,
     generatedAt:report.generatedAt,
