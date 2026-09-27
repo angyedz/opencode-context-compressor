@@ -75,7 +75,7 @@ function buildResponse(text) {
 function buildStreamChunks(text) {
   const msgId = `msg-local-${Date.now()}`;
   return [
-    `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: 'context-compressor-local', stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } })}\n\n`,
+    `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: 'context-compressor-local', stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`,
     `event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`,
     `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`,
     `event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`,
