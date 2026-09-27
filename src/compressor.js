@@ -7,6 +7,7 @@ const semanticGraph = require('./context/semantic-graph');
 const toolCompactor = require('./context/tool-compactor');
 const stateEngine = require('./context/state-engine');
 const contextPlanner = require('./context/context-planner');
+const semanticIndex = require('./context/semantic-index');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -596,19 +597,22 @@ function rescueRelevantTurns(turns, activeText, budget) {
   const activeEntities = new Set(factEntities(activeText));
   if (!activeEntities.size || budget < 400) return [];
   const dependencyMap = semanticGraph.dependencyDistances(semanticGraph.buildDependencyGraph(turns), activeText, 1);
+  const indexed = semanticIndex.buildSemanticIndex(turns);
   const candidates = [];
-  for (let i = 0; i < (turns || []).length; i += 1) {
-    const turn = turns[i];
-    const text = turn.map((m) => extractText(m.content)).join('\n');
+  for (const row of indexed) {
     let relevance = 0;
-    for (const entity of factEntities(text)) {
+    for (const entity of row.entities) {
       if (activeEntities.has(entity)) relevance += 4;
       else if (dependencyMap.get(entity) === 1) relevance += 2;
     }
+    if (!relevance) {
+      const lexical = semanticIndex.querySemanticIndex([row], activeText, { limit: 1 });
+      if (lexical.length) relevance = Math.min(3, lexical[0].lexicalOverlap || 0);
+    }
     if (!relevance) continue;
-    const size = messagesSize(turn);
+    const size = row.chars;
     if (size > Math.min(3200, budget)) continue;
-    candidates.push({ turn, relevance, i, size });
+    candidates.push({ turn: row.turn, relevance, i: row.index, size });
   }
   candidates.sort((a,b)=>b.relevance-a.relevance || b.i-a.i);
   const selected=[]; let used=0;
