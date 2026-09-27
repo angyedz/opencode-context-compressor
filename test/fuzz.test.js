@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { compressMessages, messagesSize } = require('../src/compressor');
+const { compressMessages, messagesSize, validateToolProtocol } = require('../src/compressor');
 
 function rng(seed) {
   let x = seed >>> 0;
@@ -36,5 +36,7 @@ test('deterministic fuzz: compressor preserves active turn and never mutates inp
     assert.equal(out[out.length - 1].content, active, `active turn changed at seed ${seed}`);
     assert.deepEqual(outAgain, out, `non-deterministic output at seed ${seed}`);
     assert.ok(messagesSize(out) > 0);
+    const protocol = validateToolProtocol(out);
+    assert.equal(protocol.valid, true, `tool protocol orphan at seed ${seed}: ${JSON.stringify(protocol)}`);
   }
 });
