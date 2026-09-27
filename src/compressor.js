@@ -16,6 +16,7 @@ const contradictionLedger = require('./context/contradiction-ledger');
 const taskStateGraph = require('./context/task-state-graph');
 const summaryPacker = require('./context/summary-packer');
 const diffCompactor = require('./context/diff-compactor');
+const errorLogCompactor = require('./context/error-log-compactor');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -107,16 +108,11 @@ function compressTerminalOutput(text, targetChars = 2200) {
     if (compacted.length < text.length) text = compacted;
   }
 
-  if (
-    (text.includes('npm ERR!') || text.includes('FAIL') || text.includes('Traceback (most recent call last)')) &&
-    text.split('\n').length > 50
-  ) {
-    const lines = text.split('\n');
-    text = [
-      ...lines.slice(0, 18),
-      `... [${Math.max(0, lines.length - 48)} intermediate log lines omitted] ...`,
-      ...lines.slice(-30),
-    ].join('\n');
+  if (errorLogCompactor.isErrorLog(text)) {
+    const compacted = errorLogCompactor.compactErrorLog(text, {
+      targetChars: Math.max(900, Number(targetChars) || 2200),
+    });
+    if (compacted.length < text.length) text = compacted;
   }
 
   const cap = Math.max(700, Number(targetChars) || 2200);
