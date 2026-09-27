@@ -67,7 +67,9 @@ The implementation currently uses character-based budgeting. Token counts shown 
 - Upstream HTTPS certificates are verified normally.
 - The generated CA private key is stored with mode `0600`.
 - Installation does **not** modify the global OS CA trust store. `opencode-cc` starts the local proxy on demand and scopes its CA to the launched process.
-- `opencode-cc` scopes trust to the launched Node process with `NODE_EXTRA_CA_CERTS`.
+- `opencode-cc` scopes trust to the launched OpenCode runtime with `NODE_EXTRA_CA_CERTS`.
+- Local OpenCode traffic is bypassed with `NO_PROXY=localhost,127.0.0.1,::1`.
+- Durable profile facts are injected as explicitly untrusted context data; they are not allowed to override higher-priority instructions.
 
 Because this is an HTTPS MITM proxy, only use it on machines and accounts you control.
 
@@ -87,6 +89,10 @@ Then launch:
 ```bash
 opencode-cc
 ```
+
+The launcher starts the MITM proxy only for the lifetime of OpenCode. On current OpenCode versions it automatically uses a private `--standalone` server for the TUI and `run`, so provider traffic actually inherits the proxy environment. It also merges `localhost,127.0.0.1,::1` into `NO_PROXY` to keep OpenCode's local client/server traffic out of the MITM loop.
+
+If you explicitly pass `--server`, the provider request is made by that separate OpenCode server and cannot be guaranteed to pass through this local compressor; the launcher prints a warning.
 
 Remove the MCP registration:
 
