@@ -677,6 +677,32 @@ function injectSystemDirective(messages) {
   return result;
 }
 
+function validateToolProtocol(messages) {
+  const openaiCalls = new Set();
+  const openaiResults = new Set();
+  const anthropicCalls = new Set();
+  const anthropicResults = new Set();
+
+  for (const message of messages || []) {
+    for (const call of message?.tool_calls || []) if (call?.id) openaiCalls.add(call.id);
+    if (message?.role === 'tool' && message?.tool_call_id) openaiResults.add(message.tool_call_id);
+    if (Array.isArray(message?.content)) {
+      for (const part of message.content) {
+        if (part?.type === 'tool_use' && part.id) anthropicCalls.add(part.id);
+        if (part?.type === 'tool_result' && part.tool_use_id) anthropicResults.add(part.tool_use_id);
+      }
+    }
+  }
+
+  const orphanOpenAIResults = [...openaiResults].filter((id) => !openaiCalls.has(id));
+  const orphanAnthropicResults = [...anthropicResults].filter((id) => !anthropicCalls.has(id));
+  return {
+    valid: orphanOpenAIResults.length === 0 && orphanAnthropicResults.length === 0,
+    orphanOpenAIResults,
+    orphanAnthropicResults,
+  };
+}
+
 function compressMessages(rawMessages, options = {}) {
   const cleaned = stripCommands(rawMessages);
   if (!cleaned.length) return [];
@@ -736,6 +762,7 @@ module.exports = {
   messagesSize,
   estimateTokens,
   messagesTokens,
+  validateToolProtocol,
   semanticFacts,
   collectHistoricalAnchors,
   collectRankedAnchors,
