@@ -352,6 +352,58 @@ function factTopicKey(fact) {
     .slice(0, 180);
 }
 
+function buildDependencyGraph(turns) {
+  const graph = new Map();
+  const connect = (a, b) => {
+    if (!a || !b || a === b) return;
+    if (!graph.has(a)) graph.set(a, new Set());
+    graph.get(a).add(b);
+  };
+  for (const turn of turns || []) {
+    const turnEntities = new Set();
+    for (const message of turn) {
+      const text = extractText(message?.content);
+      for (const entity of factEntities(text)) turnEntities.add(entity);
+      const facts = semanticFacts(text);
+      for (const fact of facts ? facts.split(' | ') : []) {
+        const entities = factEntities(fact);
+        for (let i = 0; i < entities.length; i += 1) {
+          for (let j = i + 1; j < entities.length; j += 1) {
+            connect(entities[i], entities[j]); connect(entities[j], entities[i]);
+          }
+        }
+      }
+    }
+    const entities = [...turnEntities].slice(0, 12);
+    for (let i = 0; i < entities.length; i += 1) {
+      for (let j = i + 1; j < entities.length; j += 1) {
+        connect(entities[i], entities[j]); connect(entities[j], entities[i]);
+      }
+    }
+  }
+  return graph;
+}
+
+function dependencyDistances(graph, activeText, maxDepth = 2) {
+  const distance = new Map();
+  const queue = [];
+  for (const seed of factEntities(activeText)) {
+    distance.set(seed, 0);
+    queue.push(seed);
+  }
+  while (queue.length) {
+    const node = queue.shift();
+    const depth = distance.get(node);
+    if (depth >= maxDepth) continue;
+    for (const next of graph.get(node) || []) {
+      if (distance.has(next)) continue;
+      distance.set(next, depth + 1);
+      queue.push(next);
+    }
+  }
+  return distance;
+}
+
 function scoreFact(fact, activeText = '') {
   const text = normalizeAnchor(fact);
   const lower = text.toLowerCase();
@@ -386,6 +438,7 @@ function lifecycleTopic(fact) {
 
 function collectRankedAnchors(turns, activeText = '', limit = 24) {
   const best = new Map();
+  const dependencyMap = dependencyDistances(buildDependencyGraph(turns), activeText, 2);
   let recency = 0;
   for (let ti = (turns || []).length - 1; ti >= 0; ti -= 1) {
     recency += 1;
@@ -395,7 +448,14 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
         const fact = normalizeAnchor(raw);
         if (!fact) continue;
         const key = anchorKey(fact);
-        const value = { fact, score: scoreFact(fact, activeText) + Math.max(0, 4 - Math.floor(recency / 3)), recency };
+        let dependencyBonus = 0;
+        for (const entity of factEntities(fact)) {
+          const depth = dependencyMap.get(entity);
+          if (depth === 0) dependencyBonus = Math.max(dependencyBonus, 10);
+          else if (depth === 1) dependencyBonus = Math.max(dependencyBonus, 6);
+          else if (depth === 2) dependencyBonus = Math.max(dependencyBonus, 3);
+        }
+        const value = { fact, score: scoreFact(fact, activeText) + dependencyBonus + Math.max(0, 4 - Math.floor(recency / 3)), recency };
         const old = best.get(key);
         if (!old || value.score > old.score || value.recency < old.recency) best.set(key, value);
       }
@@ -765,6 +825,8 @@ module.exports = {
   estimateTokens,
   messagesTokens,
   validateToolProtocol,
+  buildDependencyGraph,
+  dependencyDistances,
   semanticFacts,
   collectHistoricalAnchors,
   collectRankedAnchors,
