@@ -11,6 +11,7 @@ const semanticIndex = require('./context/semantic-index');
 const relevanceEngine = require('./context/relevance-engine');
 const analysisContext = require('./context/analysis-context');
 const provenance = require('./context/provenance');
+const envelopeBudget = require('./context/envelope-budget');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -810,7 +811,7 @@ function compressMessages(rawMessages, options = {}) {
   const cleaned = stripCommands(rawMessages);
   if (!cleaned.length) return [];
 
-  const maxChars = tokenBudget.deriveCharBudget({
+  let maxChars = tokenBudget.deriveCharBudget({
     maxChars: options.maxChars,
     maxTokens: options.maxTokens,
     defaultChars: MAX_HISTORY_CHARS,
@@ -828,6 +829,22 @@ function compressMessages(rawMessages, options = {}) {
 
   const activeTurn = turns[turns.length - 1];
   const historicalTurns = turns.slice(0, -1);
+
+  if (Number(options.maxInputTokens) > 0) {
+    const envelope = envelopeBudget.planInputEnvelope({
+      maxInputTokens: options.maxInputTokens,
+      reserveOutputTokens: options.reserveOutputTokens,
+      systemMessages: system,
+      activeTurn,
+      directiveTokens: tokenBudget.estimateTokens(buildDirective()),
+      requestedHistoryTokens: Number(options.maxTokens) > 0 ? Number(options.maxTokens) : null,
+    });
+    const envelopeChars = envelopeBudget.historyCharBudgetFromEnvelope(envelope, {
+      minChars: 800,
+      maxChars,
+    });
+    maxChars = Math.min(maxChars, envelopeChars);
+  }
 
   const agedTurnsRaw = historicalTurns.map((turn, index) => {
     const distance = historicalTurns.length - 1 - index;
