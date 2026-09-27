@@ -24,3 +24,14 @@ test('runtime metrics can clear one session independently',()=>{
   assert.equal(metrics.get('a'),null);
   assert.ok(metrics.get('b'));
 });
+
+
+test('runtime metrics replace the previous sample for the same session',()=>{
+  metrics.clear();
+  metrics.touch('same',{before:{tokens:100},after:{tokens:50},savings:{tokens:50},quality:{score:90}});
+  metrics.touch('same',{before:{tokens:200},after:{tokens:20},savings:{tokens:180},quality:{score:99}});
+  assert.equal(metrics.aggregate().sessions,1);
+  assert.equal(metrics.get('same').savings.tokens,180);
+  assert.equal(metrics.aggregate().savedTokens,180);
+  metrics.clear();
+});
