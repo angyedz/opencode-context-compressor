@@ -40,6 +40,9 @@ const server = http.createServer((req, res) => {
       });
       const streamRequested = parsed.stream === true;
 
+      // Keep local commands on the same exact-session snapshot as normal requests.
+      memoStore.syncMessages(sessionKey, messages);
+
       if (commands.isCommandMessage(messages)) {
         const replyText = commands.executeCommand(messages, sessionKey);
         res.writeHead(200, {
@@ -61,8 +64,6 @@ const server = http.createServer((req, res) => {
           choices: [{ index: 0, message: { role: 'assistant', content: replyText }, finish_reason: 'stop' }],
         }));
       }
-
-      memoStore.syncMessages(sessionKey, messages);
 
       const compressed = compressor.compressMessages(messages, {
         disabled: commands.isCompressorDisabled(sessionKey),
