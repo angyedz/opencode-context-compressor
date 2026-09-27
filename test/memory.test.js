@@ -71,4 +71,10 @@ test('session id derivation is stable for one conversation and changes with the 
 
   assert.equal(a1, a2);
   assert.notEqual(a1, b);
+
+  const switchedModel = memoStore.deriveSessionKey(
+    [{ role: 'user', content: 'build a parser' }],
+    { provider: 'different-provider.example', model: 'model-b' }
+  );
+  assert.equal(a1, switchedModel);
 });
