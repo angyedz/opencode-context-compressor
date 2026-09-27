@@ -1,113 +1,13 @@
 'use strict';
 
-/**
- * OpenCode Native Context Compressor Engine (Identical to QwenFreeApi Engine).
- * 
- * Includes:
- * 1. RTK (Rust Token Killer / Terminal & Git Diff Output Compressor)
- * 2. Skeletonizer (Skeletonization of long code files & function bodies)
- * 3. Semantic Noise Trimmer (Removes conversational AI preambles)
- * 4. Hierarchical History Aging (Hot/Warm/Cold zone compression)
- * 5. Strict Character & Token Bounding (Max 12,000 chars)
- */
+const profileStore = require('./profile-store');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
+const MIN_HISTORY_CHARS = 2000;
 
-const SYSTEM_MEMO_DIRECTIVE = `[System Directive: ModelMemo & Context Compressor]
-- A \`model-memo\` MCP server is connected to persistent storage (~/.model-memo/memo.json).
-- Before asking the user for context, past steps, or what was done earlier in the session, call \`memo_recall(query)\`.
-- Use \`memo_save(note, category)\` to save key architectural decisions or user instructions.
-- In-chat proxy management commands start with \`$context-compressor\` and execute locally.`;
-
-const COMPACTION_PROMPT = `[Context Compaction Directive]
-The preceding conversation history has been compacted using RTK & Skeletonizer to conserve context tokens.
-All core project requirements, files modified, and unresolved tasks remain preserved in the timeline above.
-Proceed with the current step immediately.`;
-
-/**
- * 1. RTK (Rust Token Killer / Terminal Output Compressor)
- * Compresses git diffs, build logs, pytest, npm, and verbose terminal outputs.
- */
-function compressTerminalOutput(text) {
-  if (typeof text !== 'string' || text.length < 500) return text;
-
-  // A) Git Diff Trimmer: keeps diff headers, @@, +, -, omits unchanged lines
-  if (text.includes('diff --git') || text.includes('--- a/') || text.includes('+++ b/')) {
-    const lines = text.split('\n');
-    const kept = [];
-    let diffContextCount = 0;
-
-    for (const line of lines) {
-      if (
-        line.startsWith('diff --git') ||
-        line.startsWith('--- ') ||
-        line.startsWith('+++ ') ||
-        line.startsWith('@@') ||
-        line.startsWith('+') ||
-        line.startsWith('-')
-      ) {
-        kept.push(line);
-        diffContextCount = 0;
-      } else if (diffContextCount < 2) {
-        kept.push(line);
-        diffContextCount += 1;
-      } else if (diffContextCount === 2) {
-        kept.push('  ... [unchanged lines omitted]');
-        diffContextCount += 1;
-      }
-    }
-    const compressed = kept.join('\n');
-    if (compressed.length < text.length) return compressed;
-  }
-
-  // B) Build Log & Error Trimmer: keeps initial error description and final stacktraces
-  if (text.includes('npm ERR!') || text.includes('FAIL') || text.includes('Traceback (most recent call last)')) {
-    const lines = text.split('\n');
-    if (lines.length > 50) {
-      const head = lines.slice(0, 15);
-      const tail = lines.slice(-25);
-      return [...head, `\n... [${lines.length - 40} lines of intermediate build/test log omitted] ...\n`, ...tail].join('\n');
-    }
-  }
-
-  // C) Universal Verbose Tool Trimmer (> 2500 chars -> keeps head 1000 + tail 1200)
-  if (text.length > 2500) {
-    const head = text.slice(0, 1000);
-    const tail = text.slice(-1200);
-    return `${head}\n\n... [${text.length - 2200} chars of verbose tool output omitted] ...\n\n${tail}`;
-  }
-
-  return text;
-}
-
-/**
- * 2. Skeletonizer (Code File Skeletonization)
- * Collapses long file contents leaving imports, signatures, and file bounds.
- */
-function skeletonizeCode(text) {
-  if (typeof text !== 'string' || text.length < 1500) return text;
-  if (!text.includes('function') && !text.includes('class') && !text.includes('def ')) return text;
-
-  const lines = text.split('\n');
-  if (lines.length < 50) return text;
-
-  const head = lines.slice(0, 15).join('\n');
-  const tail = lines.slice(-10).join('\n');
-  return `${head}\n  // ... [middle file content skeletonized (${lines.length - 25} lines)] ...\n${tail}`;
-}
-
-/**
- * 3. Semantic Noise Trimmer (AI conversational preambles)
- */
-function trimSemanticNoise(text) {
-  if (typeof text !== 'string' || text.length < 150) return text;
-
-  return text
-    .replace(/^Sure,? I can help with that\.?\s*/i, '')
-    .replace(/^Certainly!? Here is what I found:\s*/i, '')
-    .replace(/^As an AI coding assistant,?\s*/i, '')
-    .replace(/^I understand your request\.?\s*/i, '');
+function isControlCommand(text) {
+  return /^(?:\$|\/)(?:context-compressor|compressor|model-memo|memo|history|search|remember|forget|profile|reset|help)\b/i.test(String(text || '').trim());
 }
 
 function extractText(content) {
@@ -115,160 +15,420 @@ function extractText(content) {
   if (Array.isArray(content)) {
     return content.map((part) => {
       if (typeof part === 'string') return part;
-      return part?.text || part?.content || '';
-    }).join('\n');
+      if (!part || typeof part !== 'object') return '';
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.content === 'string') return part.content;
+      return '';
+    }).filter(Boolean).join('\n');
   }
-  if (content && typeof content === 'object') return content.text || content.content || '';
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text;
+    if (typeof content.content === 'string') return content.content;
+  }
   return '';
 }
 
-/**
- * Filter out in-chat $context-compressor / $compressor / $qwen-api commands and responses
- */
+function replaceTextContent(content, nextText) {
+  if (typeof content === 'string') return nextText;
+
+  if (Array.isArray(content)) {
+    let replaced = false;
+    const mapped = content.map((part) => {
+      if (typeof part === 'string') {
+        if (replaced) return '';
+        replaced = true;
+        return nextText;
+      }
+      if (!part || typeof part !== 'object') return part;
+      if (typeof part.text === 'string') {
+        if (replaced) return { ...part, text: '' };
+        replaced = true;
+        return { ...part, text: nextText };
+      }
+      if (typeof part.content === 'string') {
+        if (replaced) return { ...part, content: '' };
+        replaced = true;
+        return { ...part, content: nextText };
+      }
+      return part;
+    });
+
+    return replaced ? mapped : content;
+  }
+
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return { ...content, text: nextText };
+    if (typeof content.content === 'string') return { ...content, content: nextText };
+  }
+
+  return content;
+}
+
+function messageSize(message) {
+  try { return JSON.stringify(message).length; } catch (_) { return extractText(message?.content).length; }
+}
+
+function messagesSize(messages) {
+  return (messages || []).reduce((total, message) => total + messageSize(message), 0);
+}
+
+function compressTerminalOutput(text, targetChars = 2200) {
+  if (typeof text !== 'string' || text.length < 500) return text;
+
+  if (text.includes('diff --git') || text.includes('--- a/') || text.includes('+++ b/')) {
+    const lines = text.split('\n');
+    const kept = [];
+    let unchanged = 0;
+
+    for (const line of lines) {
+      const important = (
+        line.startsWith('diff --git') ||
+        line.startsWith('--- ') ||
+        line.startsWith('+++ ') ||
+        line.startsWith('@@') ||
+        line.startsWith('+') ||
+        line.startsWith('-')
+      );
+      if (important) {
+        kept.push(line);
+        unchanged = 0;
+      } else if (unchanged < 2) {
+        kept.push(line);
+        unchanged += 1;
+      } else if (unchanged === 2) {
+        kept.push('  ... [unchanged lines omitted] ...');
+        unchanged += 1;
+      }
+    }
+
+    const diff = kept.join('\n');
+    if (diff.length < text.length) text = diff;
+  }
+
+  if (
+    (text.includes('npm ERR!') || text.includes('FAIL') || text.includes('Traceback (most recent call last)')) &&
+    text.split('\n').length > 50
+  ) {
+    const lines = text.split('\n');
+    text = [
+      ...lines.slice(0, 18),
+      `... [${Math.max(0, lines.length - 48)} intermediate log lines omitted] ...`,
+      ...lines.slice(-30),
+    ].join('\n');
+  }
+
+  const cap = Math.max(700, Number(targetChars) || 2200);
+  if (text.length > cap) {
+    const headSize = Math.floor(cap * 0.45);
+    const tailSize = Math.floor(cap * 0.45);
+    const omitted = text.length - headSize - tailSize;
+    return `${text.slice(0, headSize)}\n... [${omitted} chars omitted; use memo_recall if needed] ...\n${text.slice(-tailSize)}`;
+  }
+
+  return text;
+}
+
+function skeletonizeCode(text, targetChars = 2200) {
+  if (typeof text !== 'string' || text.length < 1500) return text;
+  if (!/(?:\bfunction\b|\bclass\b|\bdef\s+|=>)/.test(text)) {
+    return compressTerminalOutput(text, targetChars);
+  }
+
+  const lines = text.split('\n');
+  if (lines.length < 45) return compressTerminalOutput(text, targetChars);
+
+  const structural = [];
+  for (const line of lines.slice(10, -8)) {
+    if (/^\s*(?:export\s+)?(?:async\s+)?function\s+\w+/.test(line) ||
+        /^\s*(?:export\s+)?class\s+\w+/.test(line) ||
+        /^\s*def\s+\w+/.test(line) ||
+        /^\s*(?:const|let|var)\s+\w+\s*=.*=>/.test(line)) {
+      structural.push(line.trimEnd());
+    }
+    if (structural.length >= 24) break;
+  }
+
+  const result = [
+    ...lines.slice(0, 10),
+    `... [${Math.max(0, lines.length - 18)} implementation lines compacted] ...`,
+    ...structural,
+    ...lines.slice(-8),
+  ].join('\n');
+
+  return compressTerminalOutput(result, targetChars);
+}
+
+function trimSemanticNoise(text) {
+  if (typeof text !== 'string' || text.length < 80) return text;
+  return text
+    .replace(/^Sure,? I can help with that\.?\s*/i, '')
+    .replace(/^Certainly!? Here is what I found:\s*/i, '')
+    .replace(/^As an AI coding assistant,?\s*/i, '')
+    .replace(/^I understand your request\.?\s*/i, '');
+}
+
 function stripCommands(messages) {
   if (!Array.isArray(messages)) return [];
   const result = [];
   let skipNextAssistant = false;
-  for (let i = 0; i < messages.length; i += 1) {
-    const m = messages[i];
-    if (!m) continue;
-    const txt = extractText(m.content).trim();
 
-    // Match user command triggers
-    const isCmd = m.role === 'user' && (
-      txt.startsWith('$context-compressor') || txt.startsWith('/context-compressor') ||
-      txt.startsWith('$compressor') || txt.startsWith('/compressor') ||
-      txt.startsWith('$qwen-api') || txt.startsWith('/qwen-api') ||
-      txt.startsWith('$model-memo') || txt.startsWith('/model-memo')
-    );
+  for (const message of messages) {
+    if (!message) continue;
+    const text = extractText(message.content).trim();
 
-    if (isCmd) {
+    if (message.role === 'user' && isControlCommand(text)) {
       skipNextAssistant = true;
       continue;
     }
 
-    // Match assistant command outputs
-    const isCmdReply = m.role === 'assistant' && (
-      skipNextAssistant ||
-      txt.includes('⚡') ||
-      txt.includes('Context Compressor') ||
-      txt.includes('ModelMemo') ||
-      txt.includes('Session Reset')
-    );
-
-    if (isCmdReply) {
+    if (skipNextAssistant && message.role === 'assistant') {
       skipNextAssistant = false;
       continue;
     }
 
     skipNextAssistant = false;
-    result.push(m);
+    result.push(message);
   }
+
   return result;
 }
 
-/**
- * 4. Main Hierarchical History Aging & Context Compression Entrypoint.
- */
-function compressMessages(rawMessages, options = {}) {
-  const messages = stripCommands(rawMessages);
-  if (!Array.isArray(messages) || messages.length === 0) return [];
-  if (options.disabled) return messages;
+function splitTurns(messages) {
+  const turns = [];
+  let current = [];
 
-  const maxChars = Number(options.maxChars) || MAX_HISTORY_CHARS;
-  const totalLength = messages.reduce((acc, m) => acc + extractText(m.content).length, 0);
-  const totalTurns = messages.filter((m) => m?.role !== 'system').length;
-
-  if (totalLength < Math.min(COMPACT_TRIGGER_CHARS, maxChars) && totalTurns <= 8) {
-    return messages;
-  }
-
-  const system = messages.find((m) => m?.role === 'system');
-  const userTurns = messages.filter((m) => m?.role !== 'system');
-  if (userTurns.length <= 3) return messages;
-
-  const agedMessages = userTurns.map((msg, index) => {
-    const distanceFromEnd = userTurns.length - 1 - index;
-    const contentText = extractText(msg.content);
-
-    // Hot Zone (last 2 turns): 100% intact
-    if (distanceFromEnd <= 1) return msg;
-
-    let newText = contentText;
-    // Warm Zone (turns 2-6 ago): RTK & semantic noise trimming
-    if (distanceFromEnd <= 5) {
-      if (msg.role === 'tool' || msg.role === 'user') {
-        newText = compressTerminalOutput(newText);
-      } else if (msg.role === 'assistant') {
-        newText = trimSemanticNoise(newText);
-      }
+  for (const message of messages || []) {
+    if (message?.role === 'user' && current.length) {
+      turns.push(current);
+      current = [message];
     } else {
-      // Cold Zone (older than 6 turns): Deep skeletonization
-      if (msg.role === 'tool') {
-        newText = compressTerminalOutput(newText);
-      } else if (msg.role === 'assistant') {
-        newText = skeletonizeCode(trimSemanticNoise(newText));
-      } else if (msg.role === 'user') {
-        newText = compressTerminalOutput(newText);
-      }
+      current.push(message);
     }
-
-    return { ...msg, content: newText };
-  });
-
-  const boundTextLength = agedMessages.reduce((acc, m) => acc + extractText(m.content).length, 0);
-
-  if (boundTextLength <= maxChars) {
-    let systemMsg = system;
-    if (systemMsg) {
-      const sysTxt = extractText(systemMsg.content);
-      if (!sysTxt.includes('ModelMemo & Context Compressor')) {
-        systemMsg = { ...systemMsg, content: `${sysTxt}\n\n${SYSTEM_MEMO_DIRECTIVE}` };
-      }
-    } else {
-      systemMsg = { role: 'system', content: SYSTEM_MEMO_DIRECTIVE };
-    }
-    const res = [systemMsg, ...agedMessages];
-    return res;
   }
 
-  // If still above 12,000 chars, perform strict older turn folding
-  const recent = agedMessages.slice(-3);
-  const older = agedMessages.slice(0, -3);
+  if (current.length) turns.push(current);
+  return turns;
+}
 
-  const olderSummaryLines = older.map((m, idx) => {
-    const role = (m.role || 'user').toUpperCase();
-    const txt = compressTerminalOutput(extractText(m.content)).slice(0, 400).replace(/\n+/g, ' ');
-    return `[Turn ${idx + 1} | ${role}]: ${txt}`;
-  });
+function transformMessage(message, age) {
+  const text = extractText(message?.content);
+  if (!text) return message;
 
-  let olderText = olderSummaryLines.join('\n');
-  if (olderText.length > maxChars) {
-    olderText = olderText.slice(-maxChars);
+  let next = text;
+  if (message.role === 'tool') {
+    next = compressTerminalOutput(text, age === 'cold' ? 1600 : 2400);
+  } else if (message.role === 'assistant') {
+    next = trimSemanticNoise(text);
+    if (age === 'cold' && !message.tool_calls && !message.function_call) {
+      next = skeletonizeCode(next, 2200);
+    }
+  } else if (message.role === 'user' && age === 'cold') {
+    next = compressTerminalOutput(text, 2400);
   }
 
-  const foldedUserMessage = {
+  if (next === text) return message;
+  return { ...message, content: replaceTextContent(message.content, next) };
+}
+
+function summarizeMessage(message) {
+  const role = String(message?.role || 'message').toUpperCase();
+  let text = extractText(message?.content).replace(/\s+/g, ' ').trim();
+
+  const toolNames = [];
+  if (Array.isArray(message?.tool_calls)) {
+    for (const call of message.tool_calls) {
+      const name = call?.function?.name || call?.name || call?.type;
+      if (name) toolNames.push(name);
+    }
+  }
+  if (message?.function_call?.name) toolNames.push(message.function_call.name);
+
+  if (toolNames.length) {
+    text = `${text} [tools: ${toolNames.join(', ')}]`.trim();
+  }
+
+  if (!text) return `[${role}] structured/tool event retained in active-session memory`;
+  return `[${role}] ${text.slice(0, 420)}`;
+}
+
+function summarizeTurns(turns) {
+  const lines = [];
+  let number = 1;
+
+  for (const turn of turns || []) {
+    const parts = turn.map(summarizeMessage).filter(Boolean);
+    if (parts.length) {
+      lines.push(`Turn ${number}: ${parts.join(' | ')}`);
+      number += 1;
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function makeHistorySummary(text) {
+  if (!text) return null;
+  return {
     role: 'user',
-    content: `# Compacted Conversation History\n${COMPACTION_PROMPT}\n\n### Prior Turns Summary:\n${olderText}`,
+    content:
+      '# Compacted prior conversation\n' +
+      'Older turns were compacted to keep the active prompt small. Exact details remain available only in active-session memory via memo_recall.\n\n' +
+      text,
   };
+}
 
-  // Dynamically attach SYSTEM_MEMO_DIRECTIVE to system prompt
-  let systemMsg = system;
-  if (systemMsg) {
-    const sysTxt = extractText(systemMsg.content);
-    if (!sysTxt.includes('ModelMemo & Context Compressor')) {
-      systemMsg = { ...systemMsg, content: `${sysTxt}\n\n${SYSTEM_MEMO_DIRECTIVE}` };
+function trimMessageTo(message, maxSize) {
+  if (!message || maxSize <= 0) return message;
+  if (messageSize(message) <= maxSize) return message;
+
+  const text = extractText(message.content);
+  if (!text) return message;
+
+  const overhead = Math.max(0, messageSize(message) - text.length);
+  const allowedText = Math.max(120, maxSize - overhead - 80);
+  const next = compressTerminalOutput(text, allowedText);
+  return { ...message, content: replaceTextContent(message.content, next.slice(0, allowedText)) };
+}
+
+function boundRecentHistory(turns, maxChars) {
+  let selected = [];
+  let used = 0;
+
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    const size = messagesSize(turn);
+    if (selected.length === 0 || used + size <= Math.floor(maxChars * 0.7)) {
+      selected.unshift(turn);
+      used += size;
+    } else {
+      break;
     }
-  } else {
-    systemMsg = { role: 'system', content: SYSTEM_MEMO_DIRECTIVE };
   }
 
-  const result = [];
-  result.push(systemMsg);
-  result.push(foldedUserMessage);
-  result.push(...recent);
+  const selectedCount = selected.length;
+  const older = turns.slice(0, Math.max(0, turns.length - selectedCount));
+
+  while (messagesSize(selected.flat()) > Math.floor(maxChars * 0.8) && selected.length > 1) {
+    older.push(selected.shift());
+  }
+
+  let recentFlat = selected.flat();
+  if (messagesSize(recentFlat) > Math.floor(maxChars * 0.82) && recentFlat.length) {
+    const target = Math.floor(maxChars * 0.82 / recentFlat.length);
+    recentFlat = recentFlat.map((message) => trimMessageTo(message, target));
+  }
+
+  const recentSize = messagesSize(recentFlat);
+  const available = Math.max(0, maxChars - recentSize);
+  let summaryText = summarizeTurns(older);
+  let summary = summaryText ? makeHistorySummary(summaryText) : null;
+
+  if (summary && messageSize(summary) > available) {
+    const overhead = messageSize(makeHistorySummary(''));
+    const textBudget = Math.max(0, available - overhead - 32);
+    summaryText = summaryText.slice(-textBudget);
+    summary = textBudget > 120 ? makeHistorySummary(summaryText) : null;
+  }
+
+  let result = summary ? [summary, ...recentFlat] : [...recentFlat];
+
+  while (messagesSize(result) > maxChars && result.length > 1 && result[0]?.content?.startsWith?.('# Compacted prior conversation')) {
+    const summaryMsg = result[0];
+    const over = messagesSize(result) - maxChars;
+    const currentText = extractText(summaryMsg.content);
+    const nextLen = Math.max(0, currentText.length - over - 64);
+    if (nextLen < 180) {
+      result.shift();
+      break;
+    }
+    result[0] = { ...summaryMsg, content: currentText.slice(0, nextLen) };
+  }
+
+  if (messagesSize(result) > maxChars && result.length) {
+    const budgetPerMessage = Math.max(160, Math.floor(maxChars / result.length));
+    result = result.map((message) => trimMessageTo(message, budgetPerMessage));
+  }
 
   return result;
+}
+
+function buildDirective() {
+  const profile = profileStore.summary(1200);
+  let directive =
+    '[Context Compressor]\n' +
+    '- Older conversation turns may be compacted. Before asking the user to repeat earlier-session details, use memo_recall.\n' +
+    '- Active-session history is temporary and is not retained as long-term memory.\n' +
+    '- Use profile_remember only for durable, useful preferences, workflow conventions, environment facts, or project decisions. Never store secrets or transient chatter as profile memory.';
+
+  if (profile) {
+    directive += `\n- Durable user/project profile facts:\n${profile}`;
+  }
+  return directive;
+}
+
+function injectSystemDirective(messages) {
+  const directive = buildDirective();
+  const result = [...messages];
+  const index = result.findIndex((message) => message?.role === 'system');
+
+  if (index >= 0) {
+    const current = extractText(result[index].content);
+    if (!current.includes('[Context Compressor]')) {
+      result[index] = {
+        ...result[index],
+        content: replaceTextContent(result[index].content, `${current}\n\n${directive}`),
+      };
+    }
+  } else {
+    result.unshift({ role: 'system', content: directive });
+  }
+
+  return result;
+}
+
+function compressMessages(rawMessages, options = {}) {
+  const cleaned = stripCommands(rawMessages);
+  if (!cleaned.length) return [];
+
+  const maxChars = Math.max(MIN_HISTORY_CHARS, Number(options.maxChars) || MAX_HISTORY_CHARS);
+  const system = cleaned.filter((message) => message?.role === 'system');
+  const conversation = cleaned.filter((message) => message?.role !== 'system');
+
+  if (options.disabled) {
+    return injectSystemDirective([...system, ...conversation]);
+  }
+
+  const turns = splitTurns(conversation);
+  if (!turns.length) return injectSystemDirective([...system]);
+
+  const activeTurn = turns[turns.length - 1];
+  const historicalTurns = turns.slice(0, -1);
+
+  const agedTurns = historicalTurns.map((turn, index) => {
+    const distance = historicalTurns.length - 1 - index;
+    const age = distance <= 1 ? 'warm' : 'cold';
+    return turn.map((message) => transformMessage(message, age));
+  });
+
+  const agedHistory = agedTurns.flat();
+  const trigger = Math.min(COMPACT_TRIGGER_CHARS, maxChars);
+
+  let boundedHistory;
+  if (messagesSize(agedHistory) <= trigger) {
+    boundedHistory = agedHistory;
+  } else {
+    boundedHistory = boundRecentHistory(agedTurns, maxChars);
+  }
+
+  if (messagesSize(boundedHistory) > maxChars) {
+    boundedHistory = boundRecentHistory(splitTurns(boundedHistory), maxChars);
+  }
+
+  return injectSystemDirective([
+    ...system,
+    ...boundedHistory,
+    ...activeTurn,
+  ]);
 }
 
 module.exports = {
@@ -277,5 +437,10 @@ module.exports = {
   skeletonizeCode,
   trimSemanticNoise,
   stripCommands,
-  COMPACTION_PROMPT,
+  splitTurns,
+  extractText,
+  replaceTextContent,
+  messagesSize,
+  boundRecentHistory,
+  MAX_HISTORY_CHARS,
 };
