@@ -163,7 +163,7 @@ rl.on('line', (line) => {
 
       if (name === 'profile_remember') {
         const result = profileStore.remember(args.note || '', args.category || 'other');
-        if (!result.saved) return ok(id, 'Nothing was saved.');
+        if (!result.saved) return ok(id, result.reason === 'sensitive' ? 'Refused to store a value that looks like a credential or secret.' : 'Nothing was saved.');
         return ok(id, `Remembered durable ${result.fact.category}: ${result.fact.text}`);
       }
 
