@@ -14,6 +14,8 @@ const {
   stripCommands,
   hasStructuredContent,
   semanticFacts,
+  collectRankedAnchors,
+  scoreFact,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -182,4 +184,26 @@ test('Gemini function and inline-data parts are treated as structured protocol c
   assert.equal(hasStructuredContent(functionMessage), true);
   assert.equal(hasStructuredContent(responseMessage), true);
   assert.equal(hasStructuredContent(imageMessage), true);
+});
+
+
+test('importance ranking prefers failures, contracts and active-task dependencies over chatter', () => {
+  const turns = [
+    [{ role: 'user', content: 'General discussion about colors and formatting.' }],
+    [{ role: 'assistant', content: 'Decision: src/auth/session.js API contract must keep validateSession(token). Tests failed with Error: expired token accepted.' }],
+    [{ role: 'assistant', content: 'TODO update unrelated README wording someday.' }],
+  ];
+  const ranked = collectRankedAnchors(turns, 'Fix validateSession in src/auth/session.js without breaking the API', 8);
+  const joined = ranked.join('\n');
+  assert.match(joined, /src\/auth\/session\.js/);
+  assert.match(joined, /expired token accepted/);
+  assert.ok(scoreFact('Error: expired token accepted', 'fix expired token') > scoreFact('general formatting note', 'fix expired token'));
+});
+
+test('duplicate semantic anchors are collapsed before consuming summary budget', () => {
+  const repeated = Array.from({ length: 20 }, () => [
+    { role: 'assistant', content: 'Decision: src/api/client.js API contract must remain unchanged.' },
+  ]);
+  const anchors = collectRankedAnchors(repeated, 'continue src/api/client.js', 24);
+  assert.equal(anchors.filter((x) => x.includes('src/api/client.js')).length, 1);
 });
