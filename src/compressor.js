@@ -8,6 +8,7 @@ const toolCompactor = require('./context/tool-compactor');
 const stateEngine = require('./context/state-engine');
 const contextPlanner = require('./context/context-planner');
 const semanticIndex = require('./context/semantic-index');
+const retrievalRanker = require('./context/retrieval-ranker');
 const relevanceEngine = require('./context/relevance-engine');
 const analysisContext = require('./context/analysis-context');
 const provenance = require('./context/provenance');
@@ -504,29 +505,18 @@ function recentBudgetRatio(turns, maxChars) {
 }
 
 function rescueRelevantTurns(turns, activeText, budget) {
-  const activeEntities = new Set(factEntities(activeText));
-  if (!activeEntities.size || budget < 400) return [];
-  const dependencyMap = analysisContext.dependencies(turns, activeText, 1);
+  if (!String(activeText || '').trim() || budget < 400) return [];
   const indexed = analysisContext.index(turns);
-  const candidates = [];
-  for (const row of indexed) {
-    let relevance = 0;
-    for (const entity of row.entities) {
-      if (activeEntities.has(entity)) relevance += 4;
-      else if (dependencyMap.get(entity) === 1) relevance += 2;
-    }
-    if (!relevance) {
-      const lexical = semanticIndex.querySemanticIndex([row], activeText, { limit: 1 });
-      if (lexical.length) relevance = Math.min(3, lexical[0].lexicalOverlap || 0);
-    }
-    if (!relevance) continue;
-    const size = row.chars;
-    if (size > Math.min(3200, budget)) continue;
-    candidates.push({ turn: row.turn, relevance, i: row.index, size });
+  const ranked = retrievalRanker.rank(indexed, activeText, { limit: 12, maxPerPrimaryEntity: 2 });
+  const selected = [];
+  let used = 0;
+  for (const candidate of ranked) {
+    const size = candidate.row.chars;
+    if (size > Math.min(3200, budget) || used + size > budget) continue;
+    selected.push(candidate.row.turn);
+    used += size;
+    if (selected.length >= 3) break;
   }
-  candidates.sort((a,b)=>b.relevance-a.relevance || b.i-a.i);
-  const selected=[]; let used=0;
-  for(const c of candidates){ if(used+c.size>budget) continue; selected.push(c.turn); used+=c.size; if(selected.length>=2) break; }
   return selected;
 }
 
