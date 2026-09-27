@@ -437,9 +437,25 @@ function trimMessageTo(message, maxSize) {
   return { ...message, content: replaceTextContent(message.content, next.slice(0, allowedText)) };
 }
 
+function recentBudgetRatio(turns, maxChars) {
+  const recent = (turns || []).slice(-4).flat();
+  if (!recent.length) return 0.55;
+  const total = messagesSize(recent);
+  const structured = recent.filter((m) => hasStructuredContent(m) || m.tool_calls || m.function_call || m.role === 'tool').length;
+  const density = structured / recent.length;
+  const avg = total / recent.length;
+
+  if (avg > 7000 || total > maxChars * 1.5) return 0.38;
+  if (density > 0.45 && avg > 2500) return 0.44;
+  if (avg < 1200 && total < maxChars * 0.65) return 0.68;
+  return 0.55;
+}
+
 function boundRecentHistory(turns, maxChars, activeText = '') {
   let selected = [];
   let used = 0;
+  const recentRatio = recentBudgetRatio(turns, maxChars);
+  const recentBudget = Math.floor(maxChars * recentRatio);
 
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
@@ -447,7 +463,7 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
     if (selected.length === 0 && size > Math.floor(maxChars * 0.82)) {
       break;
     }
-    if (used + size <= Math.floor(maxChars * 0.55)) {
+    if (used + size <= recentBudget) {
       selected.unshift(turn);
       used += size;
     } else {
@@ -458,7 +474,7 @@ function boundRecentHistory(turns, maxChars, activeText = '') {
   const selectedCount = selected.length;
   const older = turns.slice(0, Math.max(0, turns.length - selectedCount));
 
-  while (messagesSize(selected.flat()) > Math.floor(maxChars * 0.8) && selected.length > 1) {
+  while (messagesSize(selected.flat()) > Math.floor(maxChars * Math.max(recentRatio, 0.72)) && selected.length > 1) {
     older.push(selected.shift());
   }
 
@@ -613,6 +629,7 @@ module.exports = {
   buildStateSnapshot,
   factEntities,
   factTopicKey,
+  recentBudgetRatio,
   hasStructuredContent,
   boundRecentHistory,
   MAX_HISTORY_CHARS,
