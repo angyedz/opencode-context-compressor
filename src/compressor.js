@@ -344,7 +344,7 @@ function boundRecentHistory(turns, maxChars) {
     if (selected.length === 0 && size > Math.floor(maxChars * 0.82)) {
       break;
     }
-    if (used + size <= Math.floor(maxChars * 0.7)) {
+    if (used + size <= Math.floor(maxChars * 0.55)) {
       selected.unshift(turn);
       used += size;
     } else {
