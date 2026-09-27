@@ -23,6 +23,8 @@ const {
   stableTextFingerprint,
   collapseRepeatedToolOutputs,
   rescueRelevantTurns,
+  estimateTokens,
+  validateToolProtocol,
 } = require('../src/compressor');
 
 test('semantic anchor extractor recognizes implementation-critical facts', () => {
@@ -329,4 +331,20 @@ test('old compact turn is rescued when it directly matches active file/function 
   const rescued=rescueRelevantTurns(turns,'Fix validateSession(token) in src/auth/session.js',3000);
   assert.ok(rescued.length>=1);
   assert.match(JSON.stringify(rescued[0]),/refresh-token expiry ordering/);
+});
+
+
+test('token estimator charges dense unicode/code differently from plain character count', () => {
+  assert.ok(estimateTokens('hello world') > 0);
+  assert.ok(estimateTokens('const x = foo(bar);') > 0);
+  assert.ok(estimateTokens('你好世界你好世界') >= 8);
+});
+
+test('tool protocol validator catches orphan OpenAI and Anthropic results', () => {
+  assert.equal(validateToolProtocol([
+    {role:'assistant',tool_calls:[{id:'c1',type:'function',function:{name:'x',arguments:'{}'}}]},
+    {role:'tool',tool_call_id:'c1',content:'ok'},
+  ]).valid,true);
+  assert.equal(validateToolProtocol([{role:'tool',tool_call_id:'missing',content:'oops'}]).valid,false);
+  assert.equal(validateToolProtocol([{role:'user',content:[{type:'tool_result',tool_use_id:'missing',content:'oops'}]}]).valid,false);
 });
