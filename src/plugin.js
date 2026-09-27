@@ -34,7 +34,7 @@ function opencodeInjection(messages, options = {}) {
 
   // 3. Compress context if compaction is enabled
   const disabled = commands.isCompressorDisabled(sessionKey) || options.compressorDisabled === true;
-  const compressed = compressor.compressMessages(messages, { ...options, disabled });
+  const compressed = compressor.compressMessages(messages, { ...options, disabled, maxChars: options.maxChars || commands.getSessionLimit(sessionKey) });
 
   return {
     intercepted: false,
