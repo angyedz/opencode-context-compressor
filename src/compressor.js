@@ -8,6 +8,7 @@ const toolCompactor = require('./context/tool-compactor');
 const stateEngine = require('./context/state-engine');
 const contextPlanner = require('./context/context-planner');
 const semanticIndex = require('./context/semantic-index');
+const relevanceEngine = require('./context/relevance-engine');
 
 const MAX_HISTORY_CHARS = 16000;
 const COMPACT_TRIGGER_CHARS = 14000;
@@ -414,22 +415,7 @@ function dependencyDistances(graph, activeText, maxDepth = 2) {
 }
 
 function scoreFact(fact, activeText = '') {
-  const text = normalizeAnchor(fact);
-  const lower = text.toLowerCase();
-  let score = 1;
-  if (/\b(error|failed|exception|panic|regression|broken|failure)\b/.test(lower)) score += 7;
-  if (/\b(decision|decided|must|require|required|contract|compatib|invariant)\b/.test(lower)) score += 6;
-  if (/\b(todo|fixme|next|remaining|blocked)\b/.test(lower)) score += 5;
-  if (/(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+/.test(text)) score += 5;
-  if (/[A-Za-z_$][A-Za-z0-9_$]*\([^)]{0,120}\)/.test(text)) score += 4;
-  if (/\b(test|api|endpoint|schema|signature|branch|commit)\b/.test(lower)) score += 3;
-
-  const activeTokens = new Set(String(activeText || '').toLowerCase().match(/[a-z0-9_./-]{4,}/g) || []);
-  const factTokens = lower.match(/[a-z0-9_./-]{4,}/g) || [];
-  for (const token of factTokens) if (activeTokens.has(token)) score += 3;
-  const activeEntities = new Set(factEntities(activeText));
-  for (const entity of factEntities(text)) if (activeEntities.has(entity)) score += 8;
-  return score;
+  return relevanceEngine.scoreFactDetailed(fact, activeText).score;
 }
 
 function lifecycleState(fact) {
@@ -457,14 +443,11 @@ function collectRankedAnchors(turns, activeText = '', limit = 24) {
         const fact = normalizeAnchor(raw);
         if (!fact) continue;
         const key = anchorKey(fact);
-        let dependencyBonus = 0;
-        for (const entity of factEntities(fact)) {
-          const depth = dependencyMap.get(entity);
-          if (depth === 0) dependencyBonus = Math.max(dependencyBonus, 10);
-          else if (depth === 1) dependencyBonus = Math.max(dependencyBonus, 6);
-          else if (depth === 2) dependencyBonus = Math.max(dependencyBonus, 3);
-        }
-        const value = { fact, score: scoreFact(fact, activeText) + dependencyBonus + Math.max(0, 4 - Math.floor(recency / 3)), recency };
+        const scored = relevanceEngine.scoreFactDetailed(fact, activeText, {
+          dependencyDistances: dependencyMap,
+          recency,
+        });
+        const value = { fact, score: scored.score, reasons: scored.reasons, recency };
         const old = best.get(key);
         if (!old || value.score > old.score || value.recency < old.recency) best.set(key, value);
       }
