@@ -13,7 +13,17 @@ const {
   splitTurns,
   stripCommands,
   hasStructuredContent,
+  semanticFacts,
 } = require('../src/compressor');
+
+test('semantic anchor extractor recognizes implementation-critical facts', () => {
+  const userFacts = semanticFacts('Implement src/auth/session.js. Decision: session TTL must be 900 seconds. TODO preserve refresh behavior.');
+  const assistantFacts = semanticFacts('Added function validateSession(token) and endpoint /v1/session. Tests failed with Error: expired token accepted.');
+  assert.match(userFacts, /src\/auth\/session\.js/);
+  assert.match(userFacts, /900 seconds/);
+  assert.match(assistantFacts, /validateSession/);
+  assert.match(assistantFacts, /expired token accepted/);
+});
 
 function historicalMessages(messages) {
   const nonSystem = messages.filter((message) => message.role !== 'system');
