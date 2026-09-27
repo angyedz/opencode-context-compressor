@@ -89,6 +89,10 @@ function installCATrust() {
 // ─── Systemd service ──────────────────────────────────────────────────────────
 
 function installSystemd() {
+  if (process.platform !== 'linux') {
+    console.log('ℹ️  systemd auto-start skipped: this platform is not Linux.');
+    return false;
+  }
   fs.mkdirSync(SYSTEMD_DIR, { recursive: true });
   const service = `[Unit]
 Description=OpenCode Context Compressor MITM Proxy & ModelMemo MCP
@@ -111,8 +115,10 @@ WantedBy=default.target
     execSync('systemctl --user enable context-compressor.service', { stdio: 'ignore' });
     execSync('systemctl --user restart context-compressor.service', { stdio: 'ignore' });
     console.log('🟢 Systemd service context-compressor.service enabled and running');
+    return true;
   } catch (err) {
     console.log(`⚠️  Systemd: ${err.message}`);
+    return false;
   }
 }
 
@@ -146,14 +152,14 @@ function install() {
   installMCP();
   installCATrust();
   installWrapper();
-  installSystemd();
+  const daemonInstalled = installSystemd();
   console.log(`
-🎉 Installation complete!
+🎉 Installation ${daemonInstalled ? 'complete' : 'configured'}!
 
-  Start OpenCode through the proxy:
-    opencode-cc
+  ${daemonInstalled ? 'Start OpenCode through the proxy:' : 'The integration files are installed, but automatic daemon startup was not confirmed. Start the proxy manually before OpenCode:'}
+    ${daemonInstalled ? 'opencode-cc' : `node ${DAEMON_SCRIPT}`}
 
-  Or manually:
+  ${daemonInstalled ? 'Or manually:' : 'Then in another shell:'}
     HTTP_PROXY=http://127.0.0.1:3266 HTTPS_PROXY=http://127.0.0.1:3266 opencode
 
   In-chat commands:
