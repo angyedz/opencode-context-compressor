@@ -375,3 +375,14 @@ test('dependency-aware ranking promotes transitive facts over unrelated failures
   const ranked=collectRankedAnchors(turns,'Fix src/api/router.js auth flow',3).join('\n');
   assert.match(ranked,/src\/auth/);
 });
+
+
+test('rescue can recover a one-hop dependency even when active text does not name it', () => {
+  const turns=[
+    [{role:'user',content:'src/api/router.js delegates auth to src/auth/middleware.js.'}],
+    [{role:'assistant',content:'src/auth/middleware.js requires header normalization before auth.'}],
+    ...Array.from({length:10},(_,i)=>[{role:'user',content:'unrelated '+i},{role:'assistant',content:'done'}]),
+  ];
+  const rescued=rescueRelevantTurns(turns,'Fix src/api/router.js auth handling',2600);
+  assert.match(JSON.stringify(rescued),/src\/auth\/middleware\.js/);
+});
