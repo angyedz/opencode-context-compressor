@@ -243,11 +243,26 @@ function transformMessage(message, age) {
 
 function semanticFacts(text) {
   const source = String(text || '');
-  const candidates = source.split(/\n|(?<=[.!?])\s+/).map((line) => line.trim()).filter(Boolean);
-  const important = candidates.filter((line) =>
-    /(?:[\\/][\\w.-]+\\.[a-z0-9]+\\b|\\b[a-zA-Z_$][\\w$]*\\([^)]{0,120}\\)|\\b(?:error|failed|exception|todo|fixme|decision|decided|must|should|require|expects?|returns?|port|branch|commit|test|api|endpoint|schema|signature)\\b)/i.test(line)
-  );
-  return [...new Set(important)].slice(0, 5).join(' | ').slice(0, 700);
+  const candidates = source
+    .split(/\n|(?<=[.!?])\s+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const keywords = [
+    'error', 'failed', 'exception', 'todo', 'fixme', 'decision', 'decided',
+    'must', 'should', 'require', 'expects', 'expect', 'returns', 'return',
+    'port', 'branch', 'commit', 'test', 'api', 'endpoint', 'schema', 'signature',
+  ];
+
+  const important = candidates.filter((line) => {
+    const lower = line.toLowerCase();
+    const hasPath = /(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+/.test(line);
+    const hasSignature = /[A-Za-z_$][A-Za-z0-9_$]*\([^)]{0,120}\)/.test(line);
+    const hasKeyword = keywords.some((keyword) => lower.includes(keyword));
+    return hasPath || hasSignature || hasKeyword;
+  });
+
+  return [...new Set(important)].slice(0, 8).join(' | ').slice(0, 900);
 }
 
 function summarizeMessage(message) {
