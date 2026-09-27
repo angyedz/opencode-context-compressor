@@ -5,6 +5,7 @@ const path = require('path');
 const memoStore = require('./memo-store');
 const profileStore = require('./profile-store');
 const diagnostics = require('./context/diagnostics');
+const runtimeMetrics = require('./context/runtime-metrics');
 
 const disabledSessions = new Set();
 const sessionLimits = new Map();
@@ -103,6 +104,7 @@ function executeCommand(messages, sessionKey = 'default') {
   if (cmd === 'status') {
     const stats = memoStore.stats();
     const profile = profileStore.stats();
+    const last = runtimeMetrics.get(sessionKey);
     return [
       '⚡ **Context Compressor Status**',
       '',
@@ -110,11 +112,26 @@ function executeCommand(messages, sessionKey = 'default') {
       `- Historical budget: **${getSessionLimit(sessionKey).toLocaleString()} chars**`,
       `- Active-session memory: **${stats.entries} items across ${stats.sessions} session(s)** (temporary, non-persistent)`,
       `- Durable profile memory: **${profile.facts} facts**`,
+      ...(last ? [
+        `- Last compression: **${last.before.tokens.toLocaleString()} → ${last.after.tokens.toLocaleString()} est. tokens** (${last.savings.tokenPercent.toFixed(1)}% saved, ${last.savings.ratio.toFixed(2)}× smaller)`,
+        `- Last quality score: **${last.quality.score}/100**; protocol=${last.quality.protocolValid ? 'valid' : 'INVALID'}`,
+      ] : []),
     ].join('\n');
   }
 
   if (cmd === 'explain' || cmd === 'diagnostics' || cmd === 'debug-context') {
-    return diagnostics.render(diagnostics.inspect(messages));
+    const base = diagnostics.render(diagnostics.inspect(messages));
+    const last = runtimeMetrics.get(sessionKey);
+    if (!last) return base;
+    return [
+      base,
+      '',
+      '📉 **Last compression report**',
+      `- Estimated tokens: ${last.before.tokens.toLocaleString()} → ${last.after.tokens.toLocaleString()} (${last.savings.tokenPercent.toFixed(1)}% saved)`,
+      `- Serialized chars: ${last.before.chars.toLocaleString()} → ${last.after.chars.toLocaleString()} (${last.savings.charPercent.toFixed(1)}% saved)`,
+      `- Quality: ${last.quality.score}/100; protocol=${last.quality.protocolValid ? 'valid' : 'INVALID'}`,
+      `- Output graph: ${last.graph.nodes} nodes / ${last.graph.edges} edges`,
+    ].join('\n');
   }
 
   if (cmd === 'history' || cmd === 'timeline') {
