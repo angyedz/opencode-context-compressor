@@ -30,7 +30,7 @@ OpenCode
 
 ### 1. Active-session memory
 
-The proxy rebuilds a temporary timeline from the request history. Only one active conversation is retained in the session store; switching to another conversation replaces it. The temporary store lives under the OS temp directory and expires after inactivity.
+The proxy rebuilds a temporary timeline from the request history. Multiple active conversations are isolated by session key. Temporary sessions are bounded, expire after inactivity, and are not durable cross-session profile memory. The temporary store lives under the OS temp directory and expires after inactivity.
 
 This is what `memo_recall` searches when old turns were compacted.
 
@@ -66,14 +66,14 @@ The implementation currently uses character-based budgeting. Token counts shown 
 - Proxy listener is bound to `127.0.0.1`, not the LAN.
 - Upstream HTTPS certificates are verified normally.
 - The generated CA private key is stored with mode `0600`.
-- Installation does **not** modify the global OS CA trust store by default.
+- Installation does **not** modify the global OS CA trust store. `opencode-cc` starts the local proxy on demand and scopes its CA to the launched process.
 - `opencode-cc` scopes trust to the launched Node process with `NODE_EXTRA_CA_CERTS`.
 
 Because this is an HTTPS MITM proxy, only use it on machines and accounts you control.
 
 ## Install
 
-Requirements: Linux, Node.js 18+, OpenCode, systemd user services.
+Requirements: Node.js 18+ and OpenCode. Linux, macOS, and Windows use the same on-demand launcher model.
 
 ```bash
 git clone https://github.com/angyedz/opencode-context-compressor.git
@@ -88,7 +88,7 @@ Then launch:
 opencode-cc
 ```
 
-Uninstall the service/wrapper/MCP registration:
+Remove the MCP registration:
 
 ```bash
 node bin/cli.js uninstall
@@ -143,7 +143,7 @@ Regression tests cover:
 - OpenAI tool-call pairing;
 - Anthropic structured blocks;
 - Gemini structured parts;
-- session replacement semantics;
+- concurrent session isolation;
 - durable-profile isolation;
 - local command interception;
 - proxy / CA security invariants.
