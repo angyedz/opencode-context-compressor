@@ -4,6 +4,7 @@ const compressor=require('../compressor');
 const commands=require('../commands');
 const compressionReport=require('./compression-report');
 const runtimeMetrics=require('./runtime-metrics');
+const tokenCalibration=require('./token-calibration');
 const invariants=require('./invariants');
 
 function requestOutputReserve(body){
@@ -22,7 +23,13 @@ function requestOutputReserve(body){
 
 function resolveOptions(sessionKey,options={}){
   const reserveFromRequest=requestOutputReserve(options.requestBody);
+  const provider=options.provider||'opencode';
+  const model=options.model||options.requestBody?.model||'';
+  const tokenScale=options.tokenScale??tokenCalibration.factor(provider,model);
   return {
+    provider,
+    model,
+    tokenScale,
     ...options,
     disabled:commands.isCompressorDisabled(sessionKey)||options.compressorDisabled===true,
     maxChars:options.maxChars||commands.getSessionLimit(sessionKey),
