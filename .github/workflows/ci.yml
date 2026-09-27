@@ -44,3 +44,6 @@ jobs:
 
       - name: Benchmark smoke test
         run: npm run benchmark -- 16000
+
+      - name: Context quality benchmark
+        run: npm run benchmark:quality -- 12000
